@@ -117,6 +117,11 @@ Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.aiff\shell\TagRena
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.aiff\shell\TagRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\tagrename.ico"
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.aiff\shell\TagRename\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Tag-Rename.exe"" ""%1"""
 
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.aifc\shell\TagRename"; ValueType: none; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.aifc\shell\TagRename"; ValueType: string; ValueName: ""; ValueData: "Open with Tag:Rename"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.aifc\shell\TagRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\tagrename.ico"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.aifc\shell\TagRename\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Tag-Rename.exe"" ""%1"""
+
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ape\shell\TagRename"; ValueType: none; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ape\shell\TagRename"; ValueType: string; ValueName: ""; ValueData: "Open with Tag:Rename"
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ape\shell\TagRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\tagrename.ico"
