@@ -19,4 +19,6 @@ Notes
     between runs even when the EXE is moved.
   - Use View > Appearance to pick a colour scheme (System, Light or Dark)
     and a theme. Dark is the starting scheme.
+  - The installer adds "Open with Tag:Rename" to the right-click menu for
+    folders and common music files. Opening one file loads its whole folder.
   - The program uses no network connection.

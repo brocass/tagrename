@@ -152,3 +152,12 @@
   "Remove from tree"; default roots and built-in places do not offer this.
 - Right-clicking folder-tree rows and file-list rows no longer offers
   "Open with".
+
+## Round: shell "Open with Tag:Rename" (2026-11-25)
+
+- The Windows installer now registers a per-user "Open with Tag:Rename"
+  verb for folders and common music extensions.
+- The Linux desktop entry advertises the same action to file managers for
+  music files and folders.
+- Launching the app with a file path loads that file's whole folder and
+  checks/scrolls to the file, so the rest of the folder stays visible.

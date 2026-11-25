@@ -107,6 +107,7 @@ fn main() -> eframe::Result<()> {
     // argument style works).
     let args: Vec<String> = std::env::args().collect();
     let mut shot: Option<ShotState> = None;
+    let mut launch_paths: Vec<std::path::PathBuf> = Vec::new();
     let mut i = 1;
     while i < args.len() {
         let path = if args[i] == "--screenshot" {
@@ -125,6 +126,11 @@ fn main() -> eframe::Result<()> {
             } else {
                 p
             }
+        } else if !args[i].starts_with('-') {
+            // A path from Explorer / a file manager's "Open with" menu.
+            launch_paths.push(std::path::PathBuf::from(&args[i]));
+            i += 1;
+            continue;
         } else {
             i += 1;
             continue;
@@ -261,6 +267,9 @@ fn main() -> eframe::Result<()> {
                     }
                 }
             }
+            // A shell-launched file or folder overrides the screenshot-only
+            // staging knobs, so tests can check the real "Open with" path.
+            app.open_launch_paths(&launch_paths);
             Ok(Box::new(app))
         }),
     )

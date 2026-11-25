@@ -36,7 +36,7 @@ for s in $SIZES; do
 done
 mkdir -p "$ICON_ROOT/scalable/apps"
 install -m 644 "$HERE/icons/tagrename.svg" "$ICON_ROOT/scalable/apps/tagrename.svg"
-sed "s|^Exec=.*|Exec=$BIN_DIR/tagrename|" "$HERE/tagrename.desktop" > "$APP_DIR/tagrename.desktop"
+sed "s|^Exec=.*|Exec=$BIN_DIR/tagrename %f|" "$HERE/tagrename.desktop" > "$APP_DIR/tagrename.desktop"
 chmod 644 "$APP_DIR/tagrename.desktop"
 
 if command -v update-desktop-database >/dev/null 2>&1; then

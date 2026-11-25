@@ -412,6 +412,9 @@ pub struct App {
     pub tree_scroll_to: Option<PathBuf>,
     /// Row position in the visible list that the file list should scroll to.
     pub scroll_row: Option<usize>,
+    /// File picked in Explorer/a file manager. The containing folder is
+    /// loaded like normal, then these rows are checked and scrolled to.
+    pub pending_select: Vec<PathBuf>,
     /// Folders added as tree roots. Adding a root NEVER reads its music:
     /// the person chooses a folder inside it to load, so a library of
     /// ~20,000 songs is not pulled into the editor just by adding a root.
@@ -582,6 +585,7 @@ impl App {
             tree_selected: None,
             tree_scroll_to: None,
             scroll_row: None,
+            pending_select: Vec::new(),
             roots: load_roots(),
             hidden_roots: Vec::new(),
             address: String::new(),
@@ -892,6 +896,29 @@ impl App {
         self.say(format!("Removed {} from the folder tree.", removed.display()));
     }
 
+    /// Handle paths passed on the command line by a shell "Open with" menu.
+    /// A folder is loaded as usual. A music file loads its whole containing
+    /// folder, so the file list looks exactly as it does when the folder was
+    /// opened directly, then highlights the file that was clicked.
+    pub fn open_launch_paths(&mut self, paths: &[PathBuf]) {
+        let Some(first) = paths.first() else { return };
+        if first.is_dir() {
+            self.load_folder(first);
+            return;
+        }
+        let parent = first
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        if parent.as_os_str().is_empty() {
+            self.warn(format!("Cannot find the folder containing {}.", first.display()));
+            return;
+        }
+        self.load_folder(&parent);
+        self.pending_select.extend(paths.iter().filter(|p| !p.is_dir()).cloned());
+    }
+
     /// Open a folder: the scan runs in a background thread (a big
     /// library would otherwise freeze the window for the whole read)
     /// and `poll_loading` applies the results as they arrive. With
@@ -916,6 +943,7 @@ impl App {
         self.checked.clear();
         self.focused = None;
         self.selection_anchor = None;
+        self.pending_select.clear();
         self.folder = Some(path.to_path_buf());
         self.tree_selected = Some(path.to_path_buf());
         self.address = path.display().to_string();
@@ -953,6 +981,25 @@ impl App {
         self.checked = vec![false; self.files.len()];
         self.focused = if self.files.is_empty() { None } else { Some(0) };
         self.selection_anchor = self.focused;
+        // A file picked in Explorer/the file manager is selected after its
+        // folder has loaded, without hiding the other files in that folder.
+        let picked = std::mem::take(&mut self.pending_select);
+        if !picked.is_empty() {
+            let mut first = None;
+            for (i, f) in self.files.iter().enumerate() {
+                if picked.iter().any(|p| p == &f.path) {
+                    self.checked[i] = true;
+                    if first.is_none() {
+                        first = Some(i);
+                    }
+                }
+            }
+            if let Some(i) = first {
+                self.focused = Some(i);
+                self.selection_anchor = Some(i);
+                self.scroll_row = Some(i);
+            }
+        }
         self.folder = Some(folder.clone());
         self.address = folder.display().to_string();
         self.undo_stack.clear();
@@ -2149,6 +2196,30 @@ mod tests {
         app.add_root(&root);
         assert!(app.roots.contains(&root));
         assert!(app.hidden_roots.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn launching_a_file_loads_its_whole_folder_and_selects_the_file() {
+        let root = std::env::temp_dir().join("tagrename_launch_file_test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let first = root.join("01 - First.wav");
+        let second = root.join("02 - Second.wav");
+        std::fs::write(&first, silent_wav(1)).unwrap();
+        std::fs::write(&second, silent_wav(2)).unwrap();
+
+        let mut app = super::App::new();
+        app.open_launch_paths(&[second.clone()]);
+        settle(&mut app);
+
+        assert_eq!(app.folder.as_deref(), Some(root.as_path()));
+        assert_eq!(app.files.len(), 2, "the other files must still be listed");
+        let picked = app.files.iter().position(|f| f.path == second).unwrap();
+        assert!(app.checked[picked], "the clicked file is checked");
+        assert_eq!(app.focused, Some(picked));
+        assert_eq!(app.scroll_row, Some(picked));
+        assert!(app.pending_select.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 
