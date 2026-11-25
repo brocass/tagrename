@@ -801,15 +801,21 @@ fn folder_roots(app: &App) -> Vec<std::path::PathBuf> {
     // Windows always offers its shell places, even when a user root exists.
     roots.extend(crate::places::initial_roots());
     if let Some(folder) = &app.folder {
-        // Show the chain from / down to the current folder.
-        let mut chain: Vec<std::path::PathBuf> = Vec::new();
-        for ancestor in folder.ancestors() {
-            chain.push(ancestor.to_path_buf());
+        // Only add an ancestor chain when the folder is not already visible
+        // under one of the roots. Otherwise opening it duplicates the same
+        // path at the bottom of the tree (and, on Windows, creates blank
+        // pseudo-folder roots for shell places).
+        let visible = crate::places::expand_roots(&roots);
+        let covered = !crate::places::is_place(folder)
+            && visible.iter().any(|root| folder.starts_with(root));
+        if !covered {
+            let mut chain: Vec<std::path::PathBuf> = Vec::new();
+            for ancestor in folder.ancestors() {
+                chain.push(ancestor.to_path_buf());
+            }
+            chain.reverse();
+            roots.extend(chain);
         }
-        chain.reverse();
-        // Keep the roots the person added: loading a folder inside the
-        // library must not make that library root disappear from the tree.
-        roots.extend(chain);
     } else {
         if let Some(home) = std::env::var_os("HOME") {
             let home = std::path::PathBuf::from(home);
@@ -872,11 +878,23 @@ fn tree_node(
         .frame(false);
         let label_resp = ui.add(label);
         if label_resp.clicked() {
-            let target = crate::places::resolve(path);
-            *open_request = Some(target.clone());
-            app.tree_selected = Some(target);
-            app.tree_focus = true;
-            app.list_focus = false;
+            if crate::places::is_place(path) {
+                // Shell places are navigation nodes, not music folders.
+                // Selecting one must not add it as an opened folder.
+                if crate::places::has_children(path).unwrap_or(false) {
+                    let entry = app.expanded.entry(path.to_path_buf()).or_insert(false);
+                    *entry = !*entry;
+                }
+                app.tree_selected = Some(path.to_path_buf());
+                app.tree_focus = true;
+                app.list_focus = false;
+            } else {
+                let target = crate::places::resolve(path);
+                *open_request = Some(target.clone());
+                app.tree_selected = Some(target);
+                app.tree_focus = true;
+                app.list_focus = false;
+            }
         }
         if scroll_target == Some(path) {
             ui.scroll_to_cursor(Some(egui::Align::Center));
@@ -1607,7 +1625,10 @@ mod tests {
             roots.contains(&root),
             "the library root disappeared after selecting a folder inside it"
         );
-        assert!(roots.contains(&child));
+        assert!(
+            !roots.contains(&child),
+            "a folder already under a root must not become a second tree root"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

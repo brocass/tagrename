@@ -89,6 +89,28 @@ pub fn children(path: &Path) -> Option<Vec<PathBuf>> {
     Some(out)
 }
 
+/// The real folders a set of tree roots stands for. This lets the tree tell
+/// whether an opened folder is already visible under one of its roots, so it
+/// does not add a second ancestor chain for it.
+pub fn expand_roots(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for path in paths {
+        if is_place(path) {
+            let children = children(path).unwrap_or_default();
+            if children.is_empty() {
+                out.push(resolve(path));
+            } else {
+                out.extend(children);
+            }
+        } else {
+            out.push(path.clone());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// A shell place that stands for a real folder resolves to that folder when
 /// the person clicks it. Virtual places expand instead of loading music.
 pub fn resolve(path: &Path) -> PathBuf {

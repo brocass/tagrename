@@ -700,10 +700,10 @@ fn trim_year(raw: &str) -> String {
     }
 }
 
-/// The track number as the MP3's ID3v2 TRCK frame holds it, leading zero
-/// included ("01"). lofty reads that text as a number, so the zero is lost
-/// unless the frame is read here.
-fn id3v2_track_number(path: &Path) -> Option<String> {
+/// Read one text frame straight from an MP3's ID3v2 tag. lofty drops some
+/// frames that are legal in the wild (for example a v2.4 TDRC timestamp in
+/// a v2.3 tag), so the fields that matter to the original are read here.
+fn id3v2_text_frame(path: &Path, want: &[u8; 4]) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
 
     fn syncsafe(b: &[u8]) -> u64 {
@@ -736,19 +736,41 @@ fn id3v2_track_number(path: &Path) -> Option<String> {
         }
         let size = if version == 4 { syncsafe(&fh[4..8]) } else { plain(&fh[4..8]) };
         pos += 10 + size;
-        if &fh[0..4] == b"TRCK" {
+        if &fh[0..4] == want {
             if size == 0 || size > 1024 {
                 return None;
             }
             let mut body = vec![0u8; size as usize];
             file.read_exact(&mut body).ok()?;
-            return id3v2_text(&body).and_then(|text| {
-                let number = text.split('/').next()?.trim().trim_matches('\0').trim();
-                let digits = !number.is_empty() && number.chars().all(|c| c.is_ascii_digit());
-                digits.then(|| number.to_string())
-            });
+            return id3v2_text(&body);
         }
         file.seek(SeekFrom::Start(pos)).ok()?;
+    }
+    None
+}
+
+/// The track number as the MP3's ID3v2 TRCK frame holds it, leading zero
+/// included ("01"). lofty reads that text as a number, so the zero is lost
+/// unless the frame is read here.
+fn id3v2_track_number(path: &Path) -> Option<String> {
+    id3v2_text_frame(path, b"TRCK").and_then(|text| {
+        let number = text.split('/').next()?.trim().trim_matches('\0').trim();
+        let digits = !number.is_empty() && number.chars().all(|c| c.is_ascii_digit());
+        digits.then(|| number.to_string())
+    })
+}
+
+/// Year from the frame the original uses: ID3v2.4 TDRC (Recorded date), or
+/// TYER on older tags. A full timestamp such as 2003-01-01 is trimmed to
+/// its four-digit year.
+fn id3v2_year(path: &Path) -> Option<String> {
+    for frame in [b"TDRC", b"TYER"] {
+        if let Some(text) = id3v2_text_frame(path, frame) {
+            let year = trim_year(&text);
+            if year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()) {
+                return Some(year);
+            }
+        }
     }
     None
 }
@@ -900,8 +922,15 @@ pub fn read_file(path: &Path) -> Option<MusicFile> {
             f.rg_album_gain = t.get_string(ItemKey::ReplayGainAlbumGain).unwrap_or_default().into();
             f.rg_album_peak = t.get_string(ItemKey::ReplayGainAlbumPeak).unwrap_or_default().into();
             f.compilation = t.get_string(ItemKey::FlagCompilation).map(|s| s == "1");
-            // Keep a timestamp-looking year trimmed to four digits.
+            // Keep a timestamp-looking year trimmed to four digits. Some
+            // taggers write a v2.4 TDRC frame into a v2.3 tag; lofty skips
+            // that, so read the raw frame before giving up on the year.
             f.year = trim_year(&f.year);
+            if f.year.len() != 4 || !f.year.chars().all(|c| c.is_ascii_digit()) {
+                if let Some(raw_year) = id3v2_year(path) {
+                    f.year = raw_year;
+                }
+            }
             let cover = t.pictures().first().map(|p| {
                 let mime = match p.mime_type() {
                     Some(MimeType::Jpeg) => "JPEG",
@@ -1357,6 +1386,35 @@ mod track_zero_tests {
         assert_eq!(id3v2_track_number(&path).as_deref(), Some("01"));
         std::fs::write(&path, id3v24_with_track(b"3")).unwrap();
         assert_eq!(id3v2_track_number(&path).as_deref(), Some("3"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn id3v23_with_text_frame(id: &[u8; 4], text: &[u8]) -> Vec<u8> {
+        let mut body = vec![0u8];
+        body.extend_from_slice(text);
+        body.push(0);
+        let mut frame = id.to_vec();
+        frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&[0, 0]);
+        frame.extend_from_slice(&body);
+        let mut out = b"ID3\x03\x00\x00".to_vec();
+        out.extend_from_slice(&[
+            0,
+            ((frame.len() >> 14) & 0x7f) as u8,
+            ((frame.len() >> 7) & 0x7f) as u8,
+            (frame.len() & 0x7f) as u8,
+        ]);
+        out.extend_from_slice(&frame);
+        out
+    }
+
+    #[test]
+    fn mp3_year_reads_full_timestamp_from_tdrc() {
+        let path = std::env::temp_dir().join("tagrename-year-tdrc-test.mp3");
+        std::fs::write(&path, id3v23_with_text_frame(b"TDRC", b"2003-01-01")).unwrap();
+        assert_eq!(id3v2_year(&path).as_deref(), Some("2003"));
+        std::fs::write(&path, id3v23_with_text_frame(b"TYER", b"1987")).unwrap();
+        assert_eq!(id3v2_year(&path).as_deref(), Some("1987"));
         let _ = std::fs::remove_file(&path);
     }
 }

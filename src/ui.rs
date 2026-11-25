@@ -871,6 +871,12 @@ impl App {
     /// Search Subfolders off, only this folder's OWN files are read and
     /// its child folders are not listed at all.
     pub fn load_folder(&mut self, path: &Path) {
+        // A Windows shell place is a virtual tree node, not a folder that can
+        // be scanned. Ignore attempts from the address bar or type-ahead.
+        if crate::places::is_place(path) {
+            self.tree_selected = Some(path.to_path_buf());
+            return;
+        }
         // The tick box is captured now so a later click cannot change
         // the rules halfway through a background scan.
         let include_subfolders = self.search_subfolders;
