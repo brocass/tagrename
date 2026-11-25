@@ -1,5 +1,5 @@
 //! The per-file Tag Editor window (the original's TFORMTAGEDITOR):
-//! General / Lyrics / Additional / More Additional / Sorting
+//! General / MusicBrainz / ReplayGain / Additional / Lyrics / Sorting
 //! tabs, the fields split over two columns. With several files open, every field and the Art box have a
 //! tick box that starts off, and Save writes only the ticked ones. A
 //! cover-art area with Add / Replace, Save to File and Remove.
@@ -604,9 +604,10 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
     ui.horizontal(|ui| {
         for (i, name) in [
             "General",
-            "Lyrics",
+            "MusicBrainz",
+            "ReplayGain",
             "Additional",
-            "More Additional",
+            "Lyrics",
             "Sorting",
         ]
         .iter()
@@ -642,7 +643,7 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
     let mut genre_add: Option<String> = None;
 
     match ed.tab {
-        1 => lyrics_tab(ui, app, ed, bottom),
+        4 => lyrics_tab(ui, app, ed, bottom),
         _ => {
             // Two columns of fields (the person's request), plus the
             // cover-art area on the right. Every column is bounded so
@@ -665,8 +666,10 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
             // Two 8 px gaps separate the two field columns and the Art box.
             let col_w = ((avail - art_w - 16.0) / 2.0).max(150.0);
             {
-                // Tabs: General, Lyrics, Additional, More Additional,
-                // Sorting (the podcast/TV fields also back %swt/%eid/%snr/%enr).
+                // Tabs: General, MusicBrainz, ReplayGain, Additional,
+                // Lyrics, Sorting. Additional holds the former Additional
+                // and More Additional pages (the podcast/TV fields also
+                // back %swt/%eid/%snr/%enr).
                 let (col_a, col_b): (&[Field], &[Field]) = match ed.tab {
                     0 => (
                         &[
@@ -692,7 +695,33 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
                             Field::Compilation,
                         ],
                     ),
+                    1 => (
+                        &[
+                            Field::MbAlbumType,
+                            Field::MbAlbumArtistId,
+                            Field::MbAlbumId,
+                            Field::MbAlbumStatus,
+                            Field::MbArtistId,
+                            Field::MbRecordingId,
+                            Field::MbReleaseGroupId,
+                            Field::MbReleaseTrackId,
+                            Field::MbReleaseType,
+                            Field::MbTrackId,
+                            Field::MbAlbumReleaseCountry,
+                            Field::MbWorkId,
+                        ],
+                        &[],
+                    ),
                     2 => (
+                        &[
+                            Field::RgTrackGain,
+                            Field::RgTrackPeak,
+                            Field::RgAlbumGain,
+                            Field::RgAlbumPeak,
+                        ],
+                        &[],
+                    ),
+                    3 => (
                         &[
                             Field::Conductor,
                             Field::Lyricist,
@@ -710,9 +739,6 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
                             Field::SeasonNumber,
                             Field::EpisodeNumber,
                         ],
-                        &[],
-                    ),
-                    3 => (
                         &[
                             Field::FilePage,
                             Field::ArtistPage,
@@ -725,7 +751,6 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
                             Field::PodcastId,
                             Field::PodcastUrl,
                         ],
-                        &[],
                     ),
                     _ => (
                         &[
@@ -740,8 +765,8 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
                         ],
                     ),
                 };
-                if matches!(ed.tab, 2 | 3 | 4) {
-                    // Additional, More Additional and Sorting: every field sits
+                if matches!(ed.tab, 1 | 2 | 5) {
+                    // MusicBrainz, ReplayGain and Sorting: every field sits
                     // in one single column, each with its label.
                     let one_w = (avail - art_w - 8.0).max(200.0);
                     let tick_w = if ed.multi { 22.0 } else { 0.0 };
