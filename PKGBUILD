@@ -21,7 +21,7 @@ build() {
 package() {
   install -Dm755 "$srcdir/target/release/tagrename" "$pkgdir/usr/bin/tagrename"
   install -Dm644 "$startdir/package/tagrename.desktop" "$pkgdir/usr/share/applications/tagrename.desktop"
-  for s in 48 128 256 512; do
+  for s in 16 32 48 64 128 256 512; do
     install -Dm644 "$startdir/assets/tagrename-$s.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/tagrename.png"
   done
 }
