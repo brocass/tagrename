@@ -90,9 +90,11 @@ fn scheme(dark: bool, bg: u32, panel: u32, widget: u32, text: u32, dim: u32, acc
     }
 }
 
-/// The ten themes, in the order the Appearance window lists them. Colours
+/// The eleven themes, in the order the Appearance window lists them. Colours
 /// for the named themes are taken from the person's screenshots; Default
-/// is the Aurral theme, High Contrast and Spotty are the app's own.
+/// is the Aurral theme, High Contrast and Spotty are the app's own. Slab's
+/// background, text and accent come from the supplied theme values, with the
+/// remaining surfaces sampled from the same screenshots.
 fn build_themes() -> Vec<Theme> {
     vec![
         Theme {
@@ -134,6 +136,11 @@ fn build_themes() -> Vec<Theme> {
             name: "GitHub",
             dark: scheme(true, 0x0d1117, 0x0d1117, 0x161b22, 0xc9d1d9, 0x8b949e, 0x58a6ff, 0x30363d),
             light: scheme(false, 0xe8e8e8, 0xffffff, 0xf6f8fa, 0x24292f, 0x57606a, 0x0969da, 0xd0d7de),
+        },
+        Theme {
+            name: "Slab",
+            dark: scheme(true, 0x403d3d, 0x4f4c4c, 0x4f4c4c, 0xd5c4a1, 0xa89984, 0xf37135, 0x5e5b5b),
+            light: scheme(false, 0x8b8b8b, 0x818181, 0x818181, 0x504945, 0x656565, 0xf37135, 0x767676),
         },
         Theme {
             name: "High Contrast",
@@ -375,10 +382,24 @@ mod tests {
 
     #[test]
     fn every_theme_has_a_light_and_a_dark_version() {
-        assert_eq!(super::themes().len(), 10);
+        assert_eq!(super::themes().len(), 11);
         assert_eq!(super::themes()[0].name, "Default");
+        assert_eq!(super::themes()[8].name, "Slab");
         for t in super::themes() {
             assert!(!t.light.dark && t.dark.dark, "{}", t.name);
         }
+    }
+
+    #[test]
+    fn slab_uses_the_supplied_colours() {
+        let slab = &super::themes()[8];
+        assert_eq!(slab.light.bg, super::hex(0x8b8b8b));
+        assert_eq!(slab.light.panel, super::hex(0x818181));
+        assert_eq!(slab.light.text, super::hex(0x504945));
+        assert_eq!(slab.light.accent, super::hex(0xf37135));
+        assert_eq!(slab.dark.bg, super::hex(0x403d3d));
+        assert_eq!(slab.dark.panel, super::hex(0x4f4c4c));
+        assert_eq!(slab.dark.text, super::hex(0xd5c4a1));
+        assert_eq!(slab.dark.accent, super::hex(0xf37135));
     }
 }

@@ -1,4 +1,9 @@
-# Latest pass: modern dark mode, cover art buttons
+# Latest pass: Slab theme
+
+-57. Added Slab to View > Appearance, between GitHub and High Contrast, as the ninth theme (index 8, so existing saved choices keep their meaning). Light: background #8b8b8b, contrasting surface #818181, text #504945, accent #f37135. Dark: background #403d3d, contrasting surface #4f4c4c, text #d5c4a1, accent #f37135. The remaining dim text and accent/shadow colours are sampled from the supplied screenshots (theme.rs).
+-58. Checked with local screenshots shots/slab-dark.png and shots/slab-light.png; their dominant colours match the requested backgrounds and contrasting surfaces. cargo test passes 35/35. No Linux or Windows package was rebuilt for this theme yet.
+
+# Earlier pass: modern dark mode, cover art buttons
 
 -55. Modern dark mode is the default: the Default theme's dark palette is a charcoal (#0f1115 background, #171a21 panels, blue #5b8cff accent) and the colour scheme starts on Dark instead of System (theme.rs, main.rs). Light and the other themes are unchanged. Checked in app/shots/dark-now.png.
 -56. Cover art boxes: the size text (e.g. "920 x 549, PNG") sits on its own line, and Delete / Set from file art / Remove / Save to File sit on the row under it (ui_tabs.rs cover_panels). Checked in app/shots/dark-cover.png. mechanics.json values are unchanged.
