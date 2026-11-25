@@ -1546,8 +1546,14 @@ impl App {
             let (track, total) = fmt.apply(&f.fields.track, &f.fields.track_total, count);
             // The original saves a file only when the processed value
             // differs from the original (sub_ca9120 compares the result
-            // with the saved raw string at the end of each step).
-            if track == f.fields.track && total == f.fields.track_total {
+            // with the saved raw string at the end of each step). Compare
+            // the displayed "01/14" pair, not just the two halves: a
+            // reader splits that into track "01" and total "14", so
+            // comparing only the halves makes "01/14" -> "01" look like
+            // a no-op and skips the file.
+            if with_total(&track, &total)
+                == with_total(&f.fields.track, &f.fields.track_total)
+            {
                 continue;
             }
             let mut new_fields = f.fields.clone();

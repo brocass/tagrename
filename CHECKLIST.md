@@ -3,7 +3,12 @@
 -57. Added Slab to View > Appearance, between GitHub and High Contrast, as the ninth theme (index 8, so existing saved choices keep their meaning). Light: background #8b8b8b, contrasting surface #818181, text #504945, accent #f37135. Dark: background #403d3d, contrasting surface #4f4c4c, text #d5c4a1, accent #f37135. The remaining dim text and accent/shadow colours are sampled from the supplied screenshots (theme.rs).
 -58. Checked with local screenshots shots/slab-dark.png and shots/slab-light.png; their dominant colours match the requested backgrounds and contrasting surfaces. cargo test passes 35/35. Packages were rebuilt afterwards; see the packaging pass below.
 
-# Latest pass: package shell menus and Slab theme
+# Latest pass: Format Track # xx/xx round trip
+
+-62. Fixed the reported case where Format Track # to 0x skipped files whose track displayed as "01/14". A reader splits that into track "01" plus total "14"; the old comparison only looked at the two halves and the old 0x rule kept the total, so the result looked unchanged and no file was written. x, 0x and 00x now clear the embedded total, and the unchanged check compares the displayed "01/14" pair (tools.rs apply, ui.rs format_track).
+-63. xx/xx -> 0x -> xx/xx now round-trips: "01" -> "01/14" -> "01" -> "01/14". Tests: 37 passed, including track_formats_round_trip_between_plain_and_xx_xx and clearing_track_total_removes_the_slash_from_mp3 (which checks the raw ID3v2 TRCK frame). Packages were not rebuilt for this fix yet.
+
+# Earlier pass: package shell menus and Slab theme
 
 -59. Linux package rebuilt and installed: dist/tagrename-1.0.0-linux-x86_64.tar.gz SHA-256 abc35c87e2c616dfbdb5ee9a56e8ac2a00190e6cdfc2a91ea5bca71f1076edd6; installed /home/steven/.local/bin/tagrename SHA-256 04e5c563baf475ad85935c3687dd370609f72231b4c188239628cd7b3827085b. Desktop entry has Exec=... %f and the music MIME types; opening one WAV loaded both files and selected the clicked one.
 -60. Windows packages rebuilt in the VM from commit ebca12e: Tag-Rename-1.0.0-windows-x64.zip SHA-256 f4cdc817fac386779d9634dbd51a65e2102bc46d90a8dcf0fe5be40010ee132a and Tag-Rename-1.0.0-setup.exe SHA-256 3fa47470c5d134dd180b98a5366701e03e1e60a7b4164ee1c7ed0d3a95d90378. Installer, Start Menu shortcut, config folder and app launch all verified.

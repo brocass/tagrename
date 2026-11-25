@@ -33,14 +33,18 @@ impl TrackFormat {
     /// - xx/xx  track number with two digits, then "/" and the number of
     ///        checked files (the tracks in the EP or LP), two digits: "01/01"
     /// - xx   two digits and the total removed: "1/12" -> "01"
-    /// x, 0x and 00x keep the total as it is. A value that is not a plain
-    /// number (or is empty) is left as it is.
-    pub fn apply(self, track: &str, total: &str, checked_total: u32) -> (String, String) {
+    /// x, 0x and 00x also drop an embedded total, so "01/14" -> "01" with
+    /// 0x and can be turned back into "01/14" with xx/xx. A value that is
+    /// not a plain number (or is empty) is left as it is.
+    pub fn apply(self, track: &str, _total: &str, checked_total: u32) -> (String, String) {
         let number = |width: usize| pad_number(&drop_total(track), width);
         match self {
-            TrackFormat::X => (number(1), total.to_string()),
-            TrackFormat::ZeroX => (number(2), total.to_string()),
-            TrackFormat::ZeroZeroX => (number(3), total.to_string()),
+            // The plain-number formats produce a track number only. An
+            // xx/xx value reaches here as track "01" plus total "14", so
+            // the total has to be cleared to make "01/14" -> "01" land.
+            TrackFormat::X => (number(1), String::new()),
+            TrackFormat::ZeroX => (number(2), String::new()),
+            TrackFormat::ZeroZeroX => (number(3), String::new()),
             TrackFormat::XxXx => (number(2), format!("{checked_total:02}")),
             TrackFormat::Xx => (number(2), String::new()),
         }
@@ -289,21 +293,21 @@ mod tests {
 
     #[test]
     fn format_track_rules_follow_the_guide() {
-        // x: plain number, no leading zeros; total kept.
-        assert_eq!(TrackFormat::X.apply("05", "12", 3), ("5".into(), "12".into()));
+        // x: plain number, no leading zeros; an embedded total is dropped.
+        assert_eq!(TrackFormat::X.apply("05", "12", 3), ("5".into(), "".into()));
         assert_eq!(TrackFormat::X.apply("007", "", 3), ("7".into(), "".into()));
         assert_eq!(TrackFormat::X.apply("10", "", 3), ("10".into(), "".into()));
         assert_eq!(TrackFormat::X.apply("1", "", 3), ("1".into(), "".into()));
 
-        // 0x: two digits; total kept.
-        assert_eq!(TrackFormat::ZeroX.apply("1", "12", 3), ("01".into(), "12".into()));
+        // 0x: two digits with no "/total".
+        assert_eq!(TrackFormat::ZeroX.apply("1", "12", 3), ("01".into(), "".into()));
         assert_eq!(TrackFormat::ZeroX.apply("01", "", 3), ("01".into(), "".into()));
         assert_eq!(TrackFormat::ZeroX.apply("45", "", 3), ("45".into(), "".into()));
         assert_eq!(TrackFormat::ZeroX.apply("105", "", 3), ("105".into(), "".into()));
 
-        // 00x: three digits; total kept.
+        // 00x: three digits with no "/total".
         assert_eq!(TrackFormat::ZeroZeroX.apply("1", "", 3), ("001".into(), "".into()));
-        assert_eq!(TrackFormat::ZeroZeroX.apply("45", "9", 3), ("045".into(), "9".into()));
+        assert_eq!(TrackFormat::ZeroZeroX.apply("45", "9", 3), ("045".into(), "".into()));
         assert_eq!(TrackFormat::ZeroZeroX.apply("105", "", 3), ("105".into(), "".into()));
 
         // xx/xx: track two digits, total = checked count, two digits.
@@ -315,6 +319,35 @@ mod tests {
         assert_eq!(TrackFormat::Xx.apply("1", "12", 3), ("01".into(), "".into()));
         assert_eq!(TrackFormat::Xx.apply("5/12", "", 3), ("05".into(), "".into()));
         assert_eq!(TrackFormat::Xx.apply("", "", 3), ("".into(), "".into()));
+    }
+
+    #[test]
+    fn track_formats_round_trip_between_plain_and_xx_xx() {
+        // A reader splits "01/14" into track "01" and total "14". 0x has
+        // to clear that total, otherwise the change is invisible and the
+        // save is skipped (the reported 9-of-14 bug).
+        let (plain, plain_total) = TrackFormat::ZeroX.apply("01", "14", 14);
+        assert_eq!((plain.as_str(), plain_total.as_str()), ("01", ""));
+
+        let (with_total, with_total_total) =
+            TrackFormat::XxXx.apply(&plain, &plain_total, 14);
+        assert_eq!(
+            (with_total.as_str(), with_total_total.as_str()),
+            ("01", "14")
+        );
+
+        let (plain_again, plain_again_total) =
+            TrackFormat::ZeroX.apply(&with_total, &with_total_total, 14);
+        assert_eq!(
+            (plain_again.as_str(), plain_again_total.as_str()),
+            ("01", "")
+        );
+
+        // A plain "1" can be turned into "01/14" and back as well.
+        let (numbered, numbered_total) = TrackFormat::ZeroX.apply("1", "", 14);
+        assert_eq!((numbered.as_str(), numbered_total.as_str()), ("01", ""));
+        let (pair, pair_total) = TrackFormat::XxXx.apply(&numbered, &numbered_total, 14);
+        assert_eq!((pair.as_str(), pair_total.as_str()), ("01", "14"));
     }
 
     #[test]

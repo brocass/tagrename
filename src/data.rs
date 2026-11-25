@@ -1445,6 +1445,35 @@ mod track_save_tests {
     }
 
     #[test]
+    fn clearing_track_total_removes_the_slash_from_mp3() {
+        let path = std::env::temp_dir().join("tagrename-track-total-clear-test.mp3");
+        let mut bytes = b"ID3\x04\x00\x00\x00\x00\x00\x00".to_vec();
+        let mut frame = b"TRCK".to_vec();
+        frame.extend_from_slice(&[0, 0, 0, 6, 0, 0, 3, b'0', b'1', b'/', b'1', b'4']);
+        bytes[9] = frame.len() as u8;
+        bytes.extend_from_slice(&frame);
+        for _ in 0..400 {
+            bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+            bytes.extend_from_slice(&[0u8; 413]);
+        }
+        std::fs::write(&path, &bytes).unwrap();
+
+        let mut fields = read_file(&path).unwrap().fields;
+        assert_eq!(fields.track, "01");
+        assert_eq!(fields.track_total, "14");
+        // This is what Tools > Format Track # to 0x now produces for an
+        // xx/xx value: track stays "01" and the total is cleared.
+        fields.track_total.clear();
+        save_fields(&path, &fields, &[Field::Track, Field::TrackTotal]).unwrap();
+
+        assert_eq!(id3v2_text_frame(&path, b"TRCK").as_deref(), Some("01"));
+        let after = read_file(&path).unwrap().fields;
+        assert_eq!(after.track, "01");
+        assert_eq!(after.track_total, "");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn musicbrainz_fields_round_trip_in_mp3() {
         let path = std::env::temp_dir().join("tagrename-musicbrainz-test.mp3");
         let mut bytes = b"ID3\x04\x00\x00\x00\x00\x00\x00".to_vec();
