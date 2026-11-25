@@ -1,7 +1,13 @@
 # Latest pass: Slab theme
 
 -57. Added Slab to View > Appearance, between GitHub and High Contrast, as the ninth theme (index 8, so existing saved choices keep their meaning). Light: background #8b8b8b, contrasting surface #818181, text #504945, accent #f37135. Dark: background #403d3d, contrasting surface #4f4c4c, text #d5c4a1, accent #f37135. The remaining dim text and accent/shadow colours are sampled from the supplied screenshots (theme.rs).
--58. Checked with local screenshots shots/slab-dark.png and shots/slab-light.png; their dominant colours match the requested backgrounds and contrasting surfaces. cargo test passes 35/35. No Linux or Windows package was rebuilt for this theme yet.
+-58. Checked with local screenshots shots/slab-dark.png and shots/slab-light.png; their dominant colours match the requested backgrounds and contrasting surfaces. cargo test passes 35/35. Packages were rebuilt afterwards; see the packaging pass below.
+
+# Latest pass: package shell menus and Slab theme
+
+-59. Linux package rebuilt and installed: dist/tagrename-1.0.0-linux-x86_64.tar.gz SHA-256 abc35c87e2c616dfbdb5ee9a56e8ac2a00190e6cdfc2a91ea5bca71f1076edd6; installed /home/steven/.local/bin/tagrename SHA-256 04e5c563baf475ad85935c3687dd370609f72231b4c188239628cd7b3827085b. Desktop entry has Exec=... %f and the music MIME types; opening one WAV loaded both files and selected the clicked one.
+-60. Windows packages rebuilt in the VM from commit ebca12e: Tag-Rename-1.0.0-windows-x64.zip SHA-256 f4cdc817fac386779d9634dbd51a65e2102bc46d90a8dcf0fe5be40010ee132a and Tag-Rename-1.0.0-setup.exe SHA-256 3fa47470c5d134dd180b98a5366701e03e1e60a7b4164ee1c7ed0d3a95d90378. Installer, Start Menu shortcut, config folder and app launch all verified.
+-61. Windows shell menu verified in the installed registry: HKCU Directory\shell\TagRename has label "Open with Tag:Rename" and command "{app}\Tag-Rename.exe" "%1"; all 22 music extensions are present with the same command. Opening a sample WAV loaded its whole folder (2 files, 1 selected) and showed the Slab dark palette. The host-only rebuild script now cd's to Z:\tagrename-windows-build before invoking cargo, because PowerShell's PSDrive location alone was not inherited by cmd.exe.
 
 # Earlier pass: modern dark mode, cover art buttons
 
