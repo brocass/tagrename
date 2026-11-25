@@ -800,6 +800,23 @@ fn folder_roots(app: &App) -> Vec<std::path::PathBuf> {
     let mut roots = app.roots.clone();
     // Windows always offers its shell places, even when a user root exists.
     roots.extend(crate::places::initial_roots());
+    // Keep the default roots whether or not a folder is open. They used to
+    // be added only with no folder selected, so the first click made them
+    // vanish and replaced them with the selected folder's ancestor chain.
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = std::path::PathBuf::from(home);
+            if home.is_dir() {
+                let music = home.join("Music");
+                if music.is_dir() {
+                    roots.push(music);
+                }
+                roots.push(home);
+            }
+        }
+        roots.push(std::path::PathBuf::from("/"));
+    }
     if let Some(folder) = &app.folder {
         // Only add an ancestor chain when the folder is not already visible
         // under one of the roots. Otherwise opening it duplicates the same
@@ -816,21 +833,6 @@ fn folder_roots(app: &App) -> Vec<std::path::PathBuf> {
             chain.reverse();
             roots.extend(chain);
         }
-    } else {
-        if let Some(home) = std::env::var_os("HOME") {
-            let home = std::path::PathBuf::from(home);
-            if home.is_dir() {
-                let music = home.join("Music");
-                if music.is_dir() {
-                    roots.push(music);
-                }
-                roots.push(home);
-            }
-        }
-        // Windows has no single "/" root: its roots are the shell places
-        // above, plus drive letters under This PC.
-        #[cfg(not(windows))]
-        roots.push(std::path::PathBuf::from("/"));
     }
     roots.sort();
     roots.dedup();
@@ -1610,6 +1612,27 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_roots_stay_when_a_folder_is_selected() {
+        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+            return;
+        };
+        if !home.is_dir() {
+            return;
+        }
+        let mut before = crate::ui::App::new();
+        before.roots.clear();
+        let expected = folder_roots(&before);
+        let mut after = crate::ui::App::new();
+        after.roots.clear();
+        after.folder = Some(home);
+        assert_eq!(
+            folder_roots(&after),
+            expected,
+            "selecting Home must not replace the default roots with an ancestor chain"
+        );
+    }
 
     #[test]
     fn added_root_stays_in_the_tree_after_a_child_is_loaded() {
