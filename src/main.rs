@@ -10,7 +10,6 @@ use eframe::egui;
 mod data;
 mod genres;
 mod mask;
-mod open_with;
 mod places;
 mod theme;
 mod tools;

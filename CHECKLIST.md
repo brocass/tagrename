@@ -143,3 +143,12 @@
   "<Artist> - <Title>.mp3".
 - Screenshot knob: TAGRENAME_MASK=0|1 opens the Mask Editor for a picture.
 - Open: the Mask Editor's saved masks are not saved to disk yet.
+
+## Round: folder tree defaults and removable roots (2026-11-25)
+
+- Linux tree defaults are now just `/` and the home folder; `~/Music` is no
+  longer added unless the person adds it as a location.
+- A manually added root can be removed by right-clicking it and choosing
+  "Remove from tree"; default roots and built-in places do not offer this.
+- Right-clicking folder-tree rows and file-list rows no longer offers
+  "Open with".

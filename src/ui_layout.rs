@@ -803,15 +803,13 @@ fn folder_roots(app: &App) -> Vec<std::path::PathBuf> {
     // Keep the default roots whether or not a folder is open. They used to
     // be added only with no folder selected, so the first click made them
     // vanish and replaced them with the selected folder's ancestor chain.
+    // The requested defaults are just / and the home folder; home/Music is
+    // available when the person adds it explicitly.
     #[cfg(not(windows))]
     {
         if let Some(home) = std::env::var_os("HOME") {
             let home = std::path::PathBuf::from(home);
             if home.is_dir() {
-                let music = home.join("Music");
-                if music.is_dir() {
-                    roots.push(music);
-                }
                 roots.push(home);
             }
         }
@@ -821,11 +819,14 @@ fn folder_roots(app: &App) -> Vec<std::path::PathBuf> {
         // Only add an ancestor chain when the folder is not already visible
         // under one of the roots. Otherwise opening it duplicates the same
         // path at the bottom of the tree (and, on Windows, creates blank
-        // pseudo-folder roots for shell places).
+        // pseudo-folder roots for shell places). A location the person has
+        // removed is hidden for this session, so it does not come back as
+        // part of an ancestor chain.
         let visible = crate::places::expand_roots(&roots);
         let covered = !crate::places::is_place(folder)
             && visible.iter().any(|root| folder.starts_with(root));
-        if !covered {
+        let hidden = app.hidden_roots.iter().any(|root| folder.starts_with(root));
+        if !covered && !hidden {
             let mut chain: Vec<std::path::PathBuf> = Vec::new();
             for ancestor in folder.ancestors() {
                 chain.push(ancestor.to_path_buf());
@@ -901,11 +902,10 @@ fn tree_node(
         if scroll_target == Some(path) {
             ui.scroll_to_cursor(Some(egui::Align::Center));
         }
+        let removable_root = app.roots.iter().any(|root| root.as_path() == path);
         label_resp.context_menu(|ui| {
-            if !crate::places::is_place(path) {
-                if let Some(msg) = crate::open_with::menu(ui, path) {
-                    app.say(msg);
-                }
+            if removable_root && ui.button("Remove from tree").clicked() {
+                app.remove_root(path);
             }
         });
     });
@@ -1292,12 +1292,6 @@ fn file_list_body(app: &mut App, ui: &mut Ui, rows: &[usize], visible: &[ColumnS
                     app.tree_focus = false;
                     app.list_focus = true;
                 }
-                let row_path = app.files[i].path.clone();
-                resp.context_menu(|ui| {
-                    if let Some(msg) = crate::open_with::menu(ui, &row_path) {
-                        app.say(msg);
-                    }
-                });
                 if tri_clicked {
                     app.toggle_row_expand(i);
                 } else if resp.double_clicked() {
@@ -1613,17 +1607,21 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
     #[test]
-    fn default_roots_stay_when_a_folder_is_selected() {
+    fn default_roots_are_root_and_home_only() {
         let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
             return;
         };
         if !home.is_dir() {
             return;
         }
+        let expected = vec![std::path::PathBuf::from("/"), home.clone()];
         let mut before = crate::ui::App::new();
         before.roots.clear();
-        let expected = folder_roots(&before);
+        assert_eq!(folder_roots(&before), expected);
+        assert!(!folder_roots(&before).contains(&home.join("Music")));
+
         let mut after = crate::ui::App::new();
         after.roots.clear();
         after.folder = Some(home);
@@ -1636,6 +1634,7 @@ mod tests {
 
     #[test]
     fn added_root_stays_in_the_tree_after_a_child_is_loaded() {
+        let _roots = crate::ui::roots_test_lock();
         let root = std::env::temp_dir().join("tagrename_root_persist_test");
         let child = root.join("Artist One");
         let _ = std::fs::remove_dir_all(&root);
@@ -1651,6 +1650,27 @@ mod tests {
         assert!(
             !roots.contains(&child),
             "a folder already under a root must not become a second tree root"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn removed_root_does_not_come_back_as_an_ancestor() {
+        let _roots = crate::ui::roots_test_lock();
+        let root = std::env::temp_dir().join("tagrename_removed_root_tree_test");
+        let child = root.join("Artist One");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&child).unwrap();
+        let mut app = crate::ui::App::new();
+        app.add_root(&root);
+        app.folder = Some(child.clone());
+        assert!(folder_roots(&app).contains(&root));
+
+        app.remove_root(&root);
+        app.folder = Some(child);
+        assert!(
+            !folder_roots(&app).contains(&root),
+            "a removed location must not return as part of the selected folder's chain"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

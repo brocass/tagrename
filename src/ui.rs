@@ -416,6 +416,10 @@ pub struct App {
     /// the person chooses a folder inside it to load, so a library of
     /// ~20,000 songs is not pulled into the editor just by adding a root.
     pub roots: Vec<PathBuf>,
+    /// Locations the person removed from the tree in this session. They are
+    /// kept so opening a folder inside one does not restore it as part of an
+    /// ancestor chain.
+    pub hidden_roots: Vec<PathBuf>,
     /// The address bar's text (above the file tree, like the original's
     /// Address toolbar): paste a location and press Enter or Go.
     pub address: String,
@@ -579,6 +583,7 @@ impl App {
             tree_scroll_to: None,
             scroll_row: None,
             roots: load_roots(),
+            hidden_roots: Vec::new(),
             address: String::new(),
             undo_stack: Vec::new(),
             toast: None,
@@ -854,6 +859,7 @@ impl App {
             self.roots.push(path.to_path_buf());
             save_roots(&self.roots);
         }
+        self.hidden_roots.retain(|p| p != path);
         // Adding a location shows the new root only. It must not expand
         // the tree or change the panel width: the person reported that
         // the tree jumped to a fixed size as soon as a root was added.
@@ -863,6 +869,27 @@ impl App {
             "Added {} as a folder root. Select a folder inside it to load music.",
             path.display()
         ));
+    }
+
+    /// Remove a folder that was added to the tree by hand. Default roots and
+    /// shell places are not in `roots`, so they cannot be removed here.
+    pub fn remove_root(&mut self, path: &Path) {
+        let Some(pos) = self.roots.iter().position(|p| p.as_path() == path) else {
+            return;
+        };
+        let removed = self.roots.remove(pos);
+        save_roots(&self.roots);
+        self.hidden_roots.push(removed.clone());
+        self.expanded.remove(&removed);
+        self.folder_children.remove(&removed);
+        if self
+            .tree_selected
+            .as_deref()
+            .is_some_and(|p| p.starts_with(&removed))
+        {
+            self.tree_selected = None;
+        }
+        self.say(format!("Removed {} from the folder tree.", removed.display()));
     }
 
     /// Open a folder: the scan runs in a background thread (a big
@@ -1961,6 +1988,14 @@ fn glob_match(value: &str, spec: &str) -> bool {
 }
 
 #[cfg(test)]
+pub(crate) static ROOTS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn roots_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    ROOTS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
 mod tests {
     use super::filter_match;
 
@@ -2049,6 +2084,7 @@ mod tests {
 
     #[test]
     fn adding_a_root_does_not_read_music_until_a_child_is_selected() {
+        let _roots = super::roots_test_lock();
         let root = std::env::temp_dir().join("tagrename_scan_test");
         let _ = std::fs::remove_dir_all(&root);
         let sub = root.join("Artist One");
@@ -2089,6 +2125,30 @@ mod tests {
         settle(&mut app);
         assert_eq!(app.files.len(), 2);
         assert!(app.files.iter().all(|f| !f.is_dir));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn removing_a_root_saves_the_removal() {
+        let _roots = super::roots_test_lock();
+        let root = std::env::temp_dir().join("tagrename_remove_root_test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let mut app = super::App::new();
+        app.roots.clear();
+        app.add_root(&root);
+        assert!(super::load_roots().contains(&root));
+
+        app.remove_root(&root);
+        assert!(app.roots.is_empty());
+        assert!(!super::load_roots().contains(&root), "a removed root must not survive a restart");
+        assert!(app.hidden_roots.contains(&root));
+
+        // Adding the same location again makes it visible immediately.
+        app.add_root(&root);
+        assert!(app.roots.contains(&root));
+        assert!(app.hidden_roots.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 
