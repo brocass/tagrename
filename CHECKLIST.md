@@ -161,7 +161,7 @@
 ## Round: shell "Open with Tag:Rename" (2026-11-25)
 
 - The Windows installer now registers a per-user "Open with Tag:Rename"
-  verb for folders and common music extensions.
+  verb for folders and 21 music extensions, including .spx and .mp+.
 - The Linux desktop entry advertises the same action to file managers for
   music files and folders.
 - Launching the app with a file path loads that file's whole folder and

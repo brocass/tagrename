@@ -62,6 +62,11 @@ Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.opus\shell\TagRena
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.opus\shell\TagRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\tagrename.ico"
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.opus\shell\TagRename\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Tag-Rename.exe"" ""%1"""
 
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.spx\shell\TagRename"; ValueType: none; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.spx\shell\TagRename"; ValueType: string; ValueName: ""; ValueData: "Open with Tag:Rename"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.spx\shell\TagRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\tagrename.ico"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.spx\shell\TagRename\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Tag-Rename.exe"" ""%1"""
+
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4a\shell\TagRename"; ValueType: none; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4a\shell\TagRename"; ValueType: string; ValueName: ""; ValueData: "Open with Tag:Rename"
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4a\shell\TagRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\tagrename.ico"
@@ -126,6 +131,11 @@ Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mpc\shell\TagRenam
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mpc\shell\TagRename"; ValueType: string; ValueName: ""; ValueData: "Open with Tag:Rename"
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mpc\shell\TagRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\tagrename.ico"
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mpc\shell\TagRename\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Tag-Rename.exe"" ""%1"""
+
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp+\shell\TagRename"; ValueType: none; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp+\shell\TagRename"; ValueType: string; ValueName: ""; ValueData: "Open with Tag:Rename"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp+\shell\TagRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\tagrename.ico"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp+\shell\TagRename\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Tag-Rename.exe"" ""%1"""
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
