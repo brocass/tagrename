@@ -24,4 +24,5 @@ package() {
   for s in 16 32 48 64 128 256 512; do
     install -Dm644 "$startdir/assets/tagrename-$s.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/tagrename.png"
   done
+  install -Dm644 "$startdir/assets/tagrename.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/tagrename.svg"
 }

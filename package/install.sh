@@ -8,24 +8,34 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
-ICON_ROOT="$HOME/.local/share/icons/hicolor"
+ICON_BASE="$HOME/.local/share/icons"
+ICON_ROOT="$ICON_BASE/hicolor"
 SIZES="16 32 48 64 128 256 512"
+
+clear_old_icons() {
+    rm -f "$ICON_ROOT"/*/apps/tagrename.png
+    rm -f "$ICON_ROOT/scalable/apps/tagrename.svg"
+    rm -f "$ICON_BASE/TagRename.png"
+    find "$ICON_ROOT" -type f -name '*_TagRename*.png' -delete 2>/dev/null || true
+}
 
 if [ "$1" = "--uninstall" ]; then
     rm -f "$BIN_DIR/tagrename" "$APP_DIR/tagrename.desktop"
-    rm -f "$ICON_ROOT"/*/apps/tagrename.png
+    clear_old_icons
     echo "Tag:Rename was removed. Your settings in ~/.config/tagrename were kept."
     exit 0
 fi
 
 mkdir -p "$BIN_DIR" "$APP_DIR"
 install -m 755 "$HERE/tagrename" "$BIN_DIR/tagrename"
-# Clear every old size so a stale hicolor entry cannot win over the new icon.
-rm -f "$ICON_ROOT"/*/apps/tagrename.png
+# Clear every old icon, including the scalable SVG the launcher may prefer.
+clear_old_icons
 for s in $SIZES; do
     mkdir -p "$ICON_ROOT/${s}x${s}/apps"
     install -m 644 "$HERE/icons/tagrename-$s.png" "$ICON_ROOT/${s}x${s}/apps/tagrename.png"
 done
+mkdir -p "$ICON_ROOT/scalable/apps"
+install -m 644 "$HERE/icons/tagrename.svg" "$ICON_ROOT/scalable/apps/tagrename.svg"
 sed "s|^Exec=.*|Exec=$BIN_DIR/tagrename|" "$HERE/tagrename.desktop" > "$APP_DIR/tagrename.desktop"
 chmod 644 "$APP_DIR/tagrename.desktop"
 

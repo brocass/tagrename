@@ -18,7 +18,7 @@ cargo build --release
 rm -rf "$STAGE"
 mkdir -p "$STAGE/icons"
 cp target/release/tagrename "$STAGE/tagrename"
-cp assets/tagrename-16.png assets/tagrename-32.png assets/tagrename-48.png assets/tagrename-64.png assets/tagrename-128.png assets/tagrename-256.png assets/tagrename-512.png "$STAGE/icons/"
+cp assets/tagrename-16.png assets/tagrename-32.png assets/tagrename-48.png assets/tagrename-64.png assets/tagrename-128.png assets/tagrename-256.png assets/tagrename-512.png assets/tagrename.svg "$STAGE/icons/"
 cp package/install.sh package/tagrename.desktop package/README.txt "$STAGE/"
 chmod 755 "$STAGE/install.sh" "$STAGE/tagrename"
 
