@@ -715,14 +715,23 @@ fn folders_panel(app: &mut App, root: &mut Ui) {
             }
             ui.separator();
             let roots = folder_roots(app);
+            let scroll_target = app.tree_scroll_to.clone();
             let mut open_request: Option<std::path::PathBuf> = None;
             ScrollArea::vertical()
                 .id_salt("folder_tree")
                 .show(ui, |ui| {
                     for root in roots {
-                        tree_node(ui, app, &root, 0, &mut open_request);
+                        tree_node(
+                            ui,
+                            app,
+                            &root,
+                            0,
+                            &mut open_request,
+                            scroll_target.as_deref(),
+                        );
                     }
                 });
+            app.tree_scroll_to = None;
             if let Some(p) = open_request {
                 app.load_folder(&p);
             }
@@ -790,6 +799,7 @@ fn tree_node(
     path: &std::path::Path,
     depth: usize,
     open_request: &mut Option<std::path::PathBuf>,
+    scroll_target: Option<&std::path::Path>,
 ) {
     let is_open = *app.expanded.entry(path.to_path_buf()).or_insert(false);
     let name = path
@@ -809,7 +819,10 @@ fn tree_node(
         } else {
             ui.label(RichText::new(" ").size(12.5));
         }
-        let is_current = app.folder.as_deref() == Some(path);
+        let is_current = match &app.tree_selected {
+            Some(p) => p.as_path() == path,
+            None => app.folder.as_deref() == Some(path),
+        };
         let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 13.0), egui::Sense::hover());
         paint_folder_icon(ui.painter(), icon_rect, is_current);
         let label = egui::Button::new(
@@ -821,7 +834,12 @@ fn tree_node(
         let label_resp = ui.add(label);
         if label_resp.clicked() {
             *open_request = Some(path.to_path_buf());
+            app.tree_selected = Some(path.to_path_buf());
             app.tree_focus = true;
+            app.list_focus = false;
+        }
+        if scroll_target == Some(path) {
+            ui.scroll_to_cursor(Some(egui::Align::Center));
         }
         label_resp.context_menu(|ui| {
             if let Some(msg) = crate::open_with::menu(ui, path) {
@@ -833,27 +851,12 @@ fn tree_node(
         // A library can hold a thousand artist folders. Reading them on
         // every repaint made expanding the tree feel sluggish, so the
         // child list is read once and reused until Refresh is pressed.
-        let children = if let Some(saved) = app.folder_children.get(path) {
-            saved.clone()
-        } else {
-            let mut children: Vec<std::path::PathBuf> = Vec::new();
-            if let Ok(rd) = std::fs::read_dir(path) {
-                for e in rd.flatten() {
-                    let p = e.path();
-                    if p.is_dir() {
-                        let n = e.file_name().to_string_lossy().into_owned();
-                        if !n.starts_with('.') {
-                            children.push(p);
-                        }
-                    }
-                }
-            }
-            children.sort();
+        let children = app.tree_children(path);
+        if !app.folder_children.contains_key(path) {
             app.folder_children.insert(path.to_path_buf(), children.clone());
-            children
-        };
+        }
         for c in children {
-            tree_node(ui, app, &c, depth + 1, open_request);
+            tree_node(ui, app, &c, depth + 1, open_request, scroll_target);
         }
     }
 }
@@ -1225,6 +1228,7 @@ fn file_list_body(app: &mut App, ui: &mut Ui, rows: &[usize], visible: &[ColumnS
                 }
                 if resp.clicked() || resp.secondary_clicked() {
                     app.tree_focus = false;
+                    app.list_focus = true;
                 }
                 let row_path = app.files[i].path.clone();
                 resp.context_menu(|ui| {
@@ -1425,7 +1429,10 @@ fn shortcuts(app: &mut App, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::F8)) {
         app.show_tools_bar = !app.show_tools_bar;
     }
-    if app.tree_focus && app.dlg.tag_editor.is_none() && !ctx.egui_wants_keyboard_input() {
+    if (app.tree_focus || app.list_focus)
+        && app.dlg.tag_editor.is_none()
+        && !ctx.egui_wants_keyboard_input()
+    {
         let typed = ctx.input(|i| {
             if i.modifiers.ctrl || i.modifiers.alt || i.modifiers.command {
                 return None;
@@ -1436,7 +1443,11 @@ fn shortcuts(app: &mut App, ctx: &Context) {
             })
         });
         if let Some(c) = typed {
-            app.jump_to_letter(c);
+            if app.tree_focus {
+                app.jump_tree_letter(c);
+            } else {
+                app.jump_to_letter(c);
+            }
         }
     }
 }
@@ -1600,6 +1611,10 @@ mod tests {
         let mut app = crate::ui::App::new();
         app.load_folder(&root);
         settle(&mut app);
+        assert!(app.files.is_empty(), "an artist folder loads nothing with the box off");
+        app.search_subfolders = true;
+        app.load_folder(&root);
+        settle(&mut app);
         assert_eq!(app.files.len(), 1, "Open should list the subfolder");
         assert!(app.files[0].is_dir);
         assert_eq!(app.files[0].fields.track, "1", "folder shows its file count");
@@ -1625,6 +1640,7 @@ mod tests {
             tiny_wav(&dir.join("song.wav"));
         }
         let mut app = crate::ui::App::new();
+        app.search_subfolders = true;
         app.load_folder(&root);
         settle(&mut app);
         app.checked[0] = true;

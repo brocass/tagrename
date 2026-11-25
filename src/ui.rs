@@ -288,9 +288,11 @@ pub struct Loading {
     rx: std::sync::mpsc::Receiver<LoadEvent>,
 }
 
-/// The rows Open shows for one folder: its subfolders (as folder rows,
-/// read on demand when expanded) and its own music files, by name.
-fn scan_folder_rows(path: &Path) -> Vec<MusicFile> {
+/// The rows Open shows for one folder. `include_subfolders` is the Search
+/// Subfolders tick box: when it is off, only music files sitting directly in
+/// this folder are listed — a parent/artist folder with no direct songs
+/// therefore produces an empty list instead of a row per album.
+fn scan_folder_rows(path: &Path, include_subfolders: bool) -> Vec<MusicFile> {
     let mut rows: Vec<MusicFile> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(path) {
         let mut entries: Vec<_> = rd.flatten().collect();
@@ -300,7 +302,9 @@ fn scan_folder_rows(path: &Path) -> Vec<MusicFile> {
             let n = e.file_name().to_string_lossy().into_owned();
             if n.starts_with('.') { continue; }
             if p.is_dir() {
-                if let Some(m) = data::read_folder_row(&p) { rows.push(m); }
+                if include_subfolders {
+                    if let Some(m) = data::read_folder_row(&p) { rows.push(m); }
+                }
             } else if data::is_audio_file(&p) {
                 if let Some(m) = data::read_file(&p) { rows.push(m); }
             }
@@ -366,8 +370,16 @@ pub struct App {
     /// not change it (the first-load and later states behave the same).
     pub folder_panel_width: f32,
     /// True after a folder is picked in the folder tree, until a file row
-    /// is clicked. While it is set, typing a letter jumps the file list.
+    /// is clicked. While it is set, typing a letter jumps the folder tree.
     pub tree_focus: bool,
+    /// True after a file row is clicked, until a tree folder is picked.
+    /// While it is set, typing a letter jumps the file list.
+    pub list_focus: bool,
+    /// Folder highlighted in the folder tree. Kept separate from `folder`
+    /// so type-ahead can move the tree highlight without loading files.
+    pub tree_selected: Option<PathBuf>,
+    /// Folder row the tree should scroll into view on the next frame.
+    pub tree_scroll_to: Option<PathBuf>,
     /// Row position in the visible list that the file list should scroll to.
     pub scroll_row: Option<usize>,
     /// Folders added as tree roots. Adding a root NEVER reads its music:
@@ -533,6 +545,9 @@ impl App {
             folder_children: HashMap::new(),
             folder_panel_width: 300.0,
             tree_focus: false,
+            list_focus: false,
+            tree_selected: None,
+            tree_scroll_to: None,
             scroll_row: None,
             roots: load_roots(),
             address: String::new(),
@@ -646,6 +661,71 @@ impl App {
         }
     }
 
+    /// Child folders shown under `path` in the left tree, in display order.
+    /// The same cache the tree uses is reused so type-ahead does not re-read
+    /// a thousand directories on every keystroke.
+    pub fn tree_children(&self, path: &Path) -> Vec<PathBuf> {
+        if let Some(saved) = self.folder_children.get(path) {
+            return saved.clone();
+        }
+        let mut children: Vec<PathBuf> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(path) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    if !n.starts_with('.') {
+                        children.push(p);
+                    }
+                }
+            }
+        }
+        children.sort();
+        children
+    }
+
+    /// Type-ahead for the folder tree: move the tree highlight to the next
+    /// sibling whose name starts with `letter`, wrapping around. This only
+    /// moves the selection — it deliberately does not load any music.
+    pub fn jump_tree_letter(&mut self, letter: char) {
+        let current = self
+            .tree_selected
+            .as_deref()
+            .or_else(|| self.folder.as_deref());
+        let siblings = match current {
+            None => self.roots.clone(),
+            Some(p) if self.roots.iter().any(|r| r.as_path() == p) => self.tree_children(p),
+            Some(p) => self.tree_children(p.parent().unwrap_or(p)),
+        };
+        if siblings.is_empty() {
+            return;
+        }
+        let start = current
+            .and_then(|p| siblings.iter().position(|s| s.as_path() == p))
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let letter = letter.to_lowercase().next().unwrap_or(letter);
+        let found = (0..siblings.len())
+            .map(|k| (start + k) % siblings.len())
+            .find(|p| {
+                siblings[*p]
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.chars().next())
+                    .map(|c| c.to_lowercase().next().unwrap_or(c) == letter)
+                    .unwrap_or(false)
+            });
+        if let Some(pos) = found {
+            let path = siblings[pos].clone();
+            // Make sure the row is drawn before asking the panel to scroll.
+            let parent = path.parent().unwrap_or(path.as_path());
+            self.expanded.insert(parent.to_path_buf(), true);
+            self.tree_selected = Some(path.clone());
+            self.tree_scroll_to = Some(path);
+            self.tree_focus = true;
+        }
+    }
+
     pub fn toggle_row_check(&mut self, i: usize) {
         self.checked[i] = !self.checked[i];
         self.focused = Some(i);
@@ -748,21 +828,23 @@ impl App {
     /// Open a folder: the scan runs in a background thread (a big
     /// library would otherwise freeze the window for the whole read)
     /// and `poll_loading` applies the results as they arrive. With
-    /// Search Subfolders off, only this folder's OWN files are read.
+    /// Search Subfolders off, only this folder's OWN files are read and
+    /// its child folders are not listed at all.
     pub fn load_folder(&mut self, path: &Path) {
-        // The subfolders and this folder's own songs are read on a
-        // background thread; poll_loading shows them when the scan is
-        // done, so a large folder never freezes the window.
+        // The tick box is captured now so a later click cannot change
+        // the rules halfway through a background scan.
+        let include_subfolders = self.search_subfolders;
         let (tx, rx) = std::sync::mpsc::channel();
         let scan_path = path.to_path_buf();
         std::thread::spawn(move || {
-            let _ = tx.send(LoadEvent::Done(scan_folder_rows(&scan_path)));
+            let _ = tx.send(LoadEvent::Done(scan_folder_rows(&scan_path, include_subfolders)));
         });
         self.files.clear();
         self.checked.clear();
         self.focused = None;
         self.selection_anchor = None;
         self.folder = Some(path.to_path_buf());
+        self.tree_selected = Some(path.to_path_buf());
         self.address = path.display().to_string();
         self.undo_stack.clear();
         self.expanded_rows.clear();
@@ -812,10 +894,14 @@ impl App {
         }
         self.genres.sort();
         if self.files.is_empty() {
-            // Never silently search the whole library: opening a folder
-            // reads only that folder's own subfolders and music.
-            let _ = sub;
-            self.warn(format!("No subfolders or music files in {}", folder.display()));
+            if sub {
+                self.warn(format!("No subfolders or music files in {}", folder.display()));
+            } else {
+                self.say(format!(
+                    "No music files directly in {}. Tick Search Subfolders to list its folders.",
+                    folder.display()
+                ));
+            }
         } else {
             self.say(format!("Read {} files...", self.files.len()));
         }
@@ -1934,16 +2020,25 @@ mod tests {
         assert!(app.loading.is_none(), "adding a root must not start a scan");
         assert!(app.files.is_empty(), "the file list must be left alone");
 
-        // Opening the root lists its subfolders — it still does not
-        // pull their files into the list until a row is expanded.
+        // With the box off, a parent/artist folder with no music of its
+        // own must load nothing — no folder rows, no files.
+        app.load_folder(&root);
+        settle(&mut app);
+        assert!(app.files.is_empty(), "an artist folder loads nothing when Search Subfolders is off");
+        assert!(!app.search_subfolders, "no automatic recursive reload");
+        assert_eq!(app.folder.as_deref(), Some(root.as_path()));
+
+        // Ticking the box lists the album folders directly under it.
+        app.search_subfolders = true;
         app.load_folder(&root);
         settle(&mut app);
         assert_eq!(app.files.len(), 1);
         assert!(app.files[0].is_dir);
-        assert!(!app.search_subfolders, "no automatic recursive reload");
-        assert_eq!(app.folder.as_deref(), Some(root.as_path()));
+        assert_eq!(app.files[0].name, "Artist One");
 
-        // Opening a child folder lists its own two songs.
+        // With the box off again, an album folder with songs directly in
+        // it still loads its own two songs.
+        app.search_subfolders = false;
         app.load_folder(&sub);
         settle(&mut app);
         assert_eq!(app.files.len(), 2);
@@ -1971,6 +2066,28 @@ mod tests {
         }
         assert!(!app.search_subfolders);
         assert_eq!(app.files.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn tree_type_ahead_moves_the_highlight_without_loading_files() {
+        let root = std::env::temp_dir().join("tagrename_tree_jump_test");
+        let _ = std::fs::remove_dir_all(&root);
+        for name in ["Alpha", "Beta", "Gamma"] {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+        }
+        let mut app = super::App::new();
+        app.roots.clear();
+        app.tree_selected = Some(root.join("Alpha"));
+
+        app.jump_tree_letter('b');
+        assert_eq!(app.tree_selected.as_deref(), Some(root.join("Beta").as_path()));
+        assert_eq!(app.tree_scroll_to.as_deref(), Some(root.join("Beta").as_path()));
+        assert!(app.tree_focus, "typing in the tree keeps the tree focused");
+        assert!(app.files.is_empty(), "jumping the tree must not read music");
+
+        app.jump_tree_letter('a');
+        assert_eq!(app.tree_selected.as_deref(), Some(root.join("Alpha").as_path()), "type-ahead wraps");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
