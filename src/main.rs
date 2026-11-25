@@ -11,6 +11,7 @@ mod data;
 mod genres;
 mod mask;
 mod open_with;
+mod places;
 mod theme;
 mod tools;
 mod ui;
@@ -164,8 +165,14 @@ fn main() -> eframe::Result<()> {
         .with_min_inner_size([900.0, 600.0])
         .with_title("Tag:Rename")
         .with_app_id("tagrename")
-        .with_decorations(false)
-        .with_transparent(true);
+        .with_decorations(false);
+    // A transparent window is expensive for the software renderer in a VM.
+    // Windows keeps an opaque surface instead; the rounded chrome is still
+    // painted by the app, and no panel gap can show the desktop through it.
+    #[cfg(not(target_os = "windows"))]
+    {
+        viewport = viewport.with_transparent(true);
+    }
     if let Some(icon) = app_icon() {
         viewport = viewport.with_icon(icon);
     }
@@ -278,8 +285,18 @@ impl eframe::App for ui::App {
         ui_layout::update(self, root);
     }
 
-    // The window is see-through outside its rounded corners.
+    // On Windows the surface is opaque: it is faster without a GPU and it
+    // stops the gaps between panels showing the desktop. Other desktops keep
+    // the see-through rounded-corner look.
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+        #[cfg(target_os = "windows")]
+        {
+            let c = theme::c_panel();
+            [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, 1.0]
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            [0.0, 0.0, 0.0, 0.0]
+        }
     }
 }

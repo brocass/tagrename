@@ -10,9 +10,13 @@ Start
   Double-click Tag-Rename.exe.
 
 Notes
-  - No installer and no administrator rights are needed. Keep the program
-    in any folder you like.
-  - Your settings are kept in your user profile between runs.
+  - This ZIP is portable: running Tag-Rename.exe does not create a Start
+    menu entry. Use Tag-Rename-1.0.0-setup.exe from the release if you want
+    a Start menu / desktop shortcut.
+  - No administrator rights are needed. Keep the program in any folder you
+    like.
+  - Settings are stored in %APPDATA%\Tag-Rename, so they are remembered
+    between runs even when the EXE is moved.
   - Use View > Appearance to pick a colour scheme (System, Light or Dark)
     and a theme. Dark is the starting scheme.
   - The program uses no network connection.

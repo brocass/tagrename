@@ -798,6 +798,8 @@ fn folder_roots(app: &App) -> Vec<std::path::PathBuf> {
     // Explicit roots the person added stay in the tree on their own —
     // they never get replaced by the current folder's ancestor chain.
     let mut roots = app.roots.clone();
+    // Windows always offers its shell places, even when a user root exists.
+    roots.extend(crate::places::initial_roots());
     if let Some(folder) = &app.folder {
         // Show the chain from / down to the current folder.
         let mut chain: Vec<std::path::PathBuf> = Vec::new();
@@ -819,6 +821,9 @@ fn folder_roots(app: &App) -> Vec<std::path::PathBuf> {
                 roots.push(home);
             }
         }
+        // Windows has no single "/" root: its roots are the shell places
+        // above, plus drive letters under This PC.
+        #[cfg(not(windows))]
         roots.push(std::path::PathBuf::from("/"));
     }
     roots.sort();
@@ -835,11 +840,12 @@ fn tree_node(
     scroll_target: Option<&std::path::Path>,
 ) {
     let is_open = *app.expanded.entry(path.to_path_buf()).or_insert(false);
-    let name = path
+    let ordinary_name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
-    let has_children = path.is_dir();
+    let name = crate::places::display_name(path, ordinary_name);
+    let has_children = crate::places::has_children(path).unwrap_or_else(|| path.is_dir());
     ui.horizontal(|ui| {
         ui.add_space((depth as f32) * 14.0);
         let arrow = if is_open && has_children { "▾" } else { "▸" };
@@ -866,8 +872,9 @@ fn tree_node(
         .frame(false);
         let label_resp = ui.add(label);
         if label_resp.clicked() {
-            *open_request = Some(path.to_path_buf());
-            app.tree_selected = Some(path.to_path_buf());
+            let target = crate::places::resolve(path);
+            *open_request = Some(target.clone());
+            app.tree_selected = Some(target);
             app.tree_focus = true;
             app.list_focus = false;
         }
@@ -875,8 +882,10 @@ fn tree_node(
             ui.scroll_to_cursor(Some(egui::Align::Center));
         }
         label_resp.context_menu(|ui| {
-            if let Some(msg) = crate::open_with::menu(ui, path) {
-                app.say(msg);
+            if !crate::places::is_place(path) {
+                if let Some(msg) = crate::open_with::menu(ui, path) {
+                    app.say(msg);
+                }
             }
         });
     });

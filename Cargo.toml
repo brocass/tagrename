@@ -10,6 +10,9 @@ lofty = "0.25"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
 walkdir = "2"
 
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
 [profile.dev]
 opt-level = 1
 

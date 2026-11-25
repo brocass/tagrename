@@ -122,7 +122,7 @@ impl ViewMode {
 }
 
 /// Where the folder-tree roots are kept between runs: one path per line
-/// in the person's config folder (XDG_CONFIG_HOME, else ~/.config).
+/// in the person's config folder (AppData on Windows, XDG on Linux).
 fn roots_file() -> Option<PathBuf> {
     config_file("roots.txt")
 }
@@ -131,11 +131,27 @@ pub fn config_file(name: &str) -> Option<PathBuf> {
     if cfg!(test) {
         return Some(std::env::temp_dir().join(format!("tagrename_test_{}_{}", name, std::process::id())));
     }
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("tagrename").join(name))
+    #[cfg(windows)]
+    {
+        // Windows has no XDG_CONFIG_HOME. Use the per-user AppData folder so
+        // a portable EXE remembers its settings just like an installed one.
+        let base = std::env::var_os("APPDATA")
+            .or_else(|| std::env::var_os("LOCALAPPDATA"))
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("USERPROFILE")
+                    .map(|p| PathBuf::from(p).join("AppData").join("Roaming"))
+            })?;
+        Some(base.join("Tag-Rename").join(name))
+    }
+    #[cfg(not(windows))]
+    {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+        Some(base.join("tagrename").join(name))
+    }
 }
 
 /// The file list's columns, in the order the person arranged them, with
@@ -681,6 +697,9 @@ impl App {
         if let Some(saved) = self.folder_children.get(path) {
             return saved.clone();
         }
+        if let Some(places) = crate::places::children(path) {
+            return places;
+        }
         let mut children: Vec<PathBuf> = Vec::new();
         if let Ok(rd) = std::fs::read_dir(path) {
             for e in rd.flatten() {
@@ -705,9 +724,13 @@ impl App {
             .tree_selected
             .as_deref()
             .or_else(|| self.folder.as_deref());
+        let mut roots = self.roots.clone();
+        roots.extend(crate::places::initial_roots());
+        roots.sort();
+        roots.dedup();
         let siblings = match current {
-            None => self.roots.clone(),
-            Some(p) if self.roots.iter().any(|r| r.as_path() == p) => self.tree_children(p),
+            None => roots,
+            Some(p) if roots.iter().any(|r| r.as_path() == p) => self.tree_children(p),
             Some(p) => self.tree_children(p.parent().unwrap_or(p)),
         };
         if siblings.is_empty() {
@@ -721,10 +744,14 @@ impl App {
         let found = (0..siblings.len())
             .map(|k| (start + k) % siblings.len())
             .find(|p| {
-                siblings[*p]
+                let sibling = &siblings[*p];
+                let fallback = sibling
                     .file_name()
-                    .and_then(|n| n.to_str())
-                    .and_then(|n| n.chars().next())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| sibling.display().to_string());
+                crate::places::display_name(sibling, fallback)
+                    .chars()
+                    .next()
                     .map(|c| c.to_lowercase().next().unwrap_or(c) == letter)
                     .unwrap_or(false)
             });
