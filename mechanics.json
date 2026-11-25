@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "values": [
+    {"name": "default rename mask", "group": "rename", "value": "%1 - %2", "source": "reference/picture-1.png (File name mask field)"},
+    {"name": "rename keeps file extension", "group": "rename", "value": true, "source": "reference/picture-1.png (preview ends in .mp3)"},
+    {"name": "replace spaces with underscores (default)", "group": "rename", "value": false, "source": "reference/picture-1.png (checkbox unticked)"},
+    {"name": "default case change", "group": "rename", "value": "None", "source": "reference/picture-2.png (None selected)"},
+    {"name": "case modes", "group": "rename", "value": "None, Upper, Lower, Capitalize First Letter, Capitalize First Word", "source": "reference/picture-1.png, reference/picture-2.png"},
+    {"name": "rename variable count", "group": "rename", "value": 15, "source": "reference/picture-1.png (Rename variables list)"},
+    {"name": "rename undo depth", "group": "rename", "value": 1, "estimated": true},
+    {"name": "illegal filename character replacement", "group": "rename", "value": "-", "estimated": true},
+    {"name": "capitalize first letter rule", "group": "rename", "value": "first letter of each word", "estimated": true},
+    {"name": "capitalize first word rule", "group": "rename", "value": "first letter of the whole name", "estimated": true},
+    {"name": "time display", "group": "display", "value": "mm:ss", "source": "reference/picture-2.png (Time column 07:02, 06:12)"},
+    {"name": "bitrate display", "group": "display", "value": "320k", "source": "reference/picture-2.png (Bitrate column)"},
+    {"name": "file size total unit", "group": "display", "value": "MB", "source": "reference/picture-2.png (Total size: 8.23 MB)"},
+    {"name": "cover picture caption", "group": "display", "value": "Picture: W x H, KB", "source": "reference/picture-1.png (Picture: 1200 x 1200, 112 KB)"},
+    {"name": "status bar fields", "group": "display", "value": "Total files, Selected files, Total time, Total size", "source": "reference/picture-1.png (status bar)"},
+    {"name": "folder tree keyboard jump", "group": "navigation", "value": "letter or number jumps to first visible folder starting with it; pressing again cycles", "source": "user request"},
+    {"name": "folder tree arrow keys", "group": "navigation", "value": "up/down move, right/left expand/collapse", "estimated": true},
+    {"name": "shortcut Rename Files", "group": "controls", "value": "F4", "source": "reference/picture-1.png (Rename Files (F4))"},
+    {"name": "shortcut Multi-File Tag Editor", "group": "controls", "value": "Ctrl+F4", "source": "reference/picture-1.png (Multi File Tag Editor (Ctrl+F4))"},
+    {"name": "shortcut Tools Bar", "group": "controls", "value": "F8", "source": "reference/picture-1.png (Hide Tools Bar (F8))"},
+    {"name": "shortcut Options Panel", "group": "controls", "value": "F9", "source": "reference/picture-2.png (Hide Options Panel F9)"},
+    {"name": "shortcut Select All", "group": "controls", "value": "Ctrl+A", "source": "reference/picture-1.png (Multi-file editor shortcut family)", "estimated": true},
+    {"name": "tag editor tabs", "group": "tag editor", "value": "General, Lyrics, Additional, More Additional, Sorting", "source": "reference/picture-1.png (tabs row)"},
+    {"name": "tag editor buttons", "group": "tag editor", "value": "Save and Prev, Save, Cancel, Save and Next", "source": "reference/picture-1.png (button row)"},
+    {"name": "tag editor track fields", "group": "tag editor", "value": "track and disc number with total", "source": "reference/picture-3.png (Track #, Disc #)"},
+    {"name": "tag editor art panel size", "group": "tag editor", "value": 190, "unit": "px", "estimated": true}
+  ]
+}

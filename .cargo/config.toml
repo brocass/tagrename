@@ -1,0 +1,4 @@
+[build]
+# Limit parallel rustc jobs: the sandbox has limited free memory and
+# unbounded parallel builds were being killed (SIGKILL) by the kernel.
+jobs = 2

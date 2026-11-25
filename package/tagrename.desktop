@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Tag:Rename
+GenericName=Music tag editor
+Comment=Edit music tags and rename files in bulk
+Exec=tagrename
+Icon=tagrename
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+Keywords=music;tags;rename;mp3;flac;
+StartupNotify=true
+StartupWMClass=tagrename

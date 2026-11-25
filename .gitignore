@@ -1,0 +1,11 @@
+# Build output
+/target/
+/src/target/
+
+# Packaged artifacts (built on demand by package.sh / package-windows.bat)
+/dist/
+/pkg/
+
+# Local development logs and screenshots
+/buildlog.txt
+/shots/
