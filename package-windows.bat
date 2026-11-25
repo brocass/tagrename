@@ -17,6 +17,7 @@ if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"
 copy /y "target\release\tagrename.exe" "%STAGE%\Tag-Rename.exe" >nul
 copy /y "package\README-windows.txt" "%STAGE%\README.txt" >nul
+copy /y "assets\tagrename.ico" "%STAGE%\tagrename.ico" >nul
 
 powershell -NoProfile -Command "Compress-Archive -Path '%STAGE%\*' -DestinationPath 'dist\%NAME%.zip' -Force"
 rmdir /s /q "%STAGE%"

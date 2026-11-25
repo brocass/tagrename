@@ -3,6 +3,7 @@ Tag:Rename 1.0.0 - modern dark edition (Windows, 64-bit)
 
 What is in this folder
   Tag-Rename.exe  the program
+  tagrename.ico   the app icon
   README.txt      this file
 
 Start
