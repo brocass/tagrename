@@ -1,5 +1,5 @@
-//! The main window layout: menu bar, toolbar, tools bar, folder tree,
-//! file list, status bar, shortcuts and the screenshot flow.
+//! The main window layout: menu bar, tools bar, the compact action strip
+//! above the folder tree, file list, status bar, shortcuts and screenshots.
 
 use egui::{CentralPanel, Context, Key, Layout, RichText, ScrollArea, Sense, Stroke, Ui};
 
@@ -35,10 +35,12 @@ pub fn update(app: &mut App, root: &mut Ui) {
 
     window_chrome(root, &ctx);
     menu_bar(app, root, &ctx);
-    toolbar(app, root, &ctx);
     if app.show_tools_bar {
         tools_panel(app, root);
     }
+    // The refresh/edit row sits directly above the folder tree, not up in
+    // the title/menu strip. Its dark frame keeps it visually separate.
+    toolbar(app, root, &ctx);
     status_bar(app, root);
     if app.show_folders {
         folders_panel(app, root);
@@ -82,6 +84,7 @@ fn window_chrome(root: &mut Ui, ctx: &Context) {
     let maximized = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
     egui::Panel::top("titlebar")
         .exact_size(TITLE_BAR_H)
+        .show_separator_line(false)
         .frame(
             egui::Frame::new()
                 .fill(c_header())
@@ -218,6 +221,7 @@ fn menu_item(ui: &mut Ui, label: &str) -> egui::Response {
 
 fn menu_bar(app: &mut App, root: &mut Ui, ctx: &Context) {
     egui::Panel::top("menubar")
+        .show_separator_line(false)
         .frame(menu_frame())
         .show(root, |ui| {
             egui::MenuBar::new().style(menu_bar_style).ui(ui, |ui| {
@@ -493,82 +497,103 @@ fn menu_frame() -> egui::Frame {
         .stroke(Stroke::NONE)
 }
 
+/// How much smaller the action strip above the tree is than the rest of
+/// the interface: a quarter less, as the person asked.
+const ACTION_SCALE: f32 = 0.75;
+
+fn compact_tool_button(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
+    ui.add(egui::Button::new(label)).on_hover_text(tooltip)
+}
+
 fn toolbar(app: &mut App, root: &mut Ui, _ctx: &Context) {
     egui::Panel::top("toolbar")
-        .frame(menu_frame())
+        .show_separator_line(false)
+        .frame(
+            egui::Frame::new()
+                .fill(c_header())
+                .inner_margin(egui::Margin::symmetric(5, 1))
+                .stroke(Stroke::NONE),
+        )
         .show(root, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                if tool_button(ui, "↻ Refresh", "Refresh file list (Ctrl+R)").clicked() {
-                    if let Some(folder) = app.folder.clone() {
-                        app.load_folder(&folder);
-                    }
+            // Scale the whole strip - text, spacing and buttons - to 75%.
+            ui.scope(|ui| {
+                let mut style = (**ui.style()).clone();
+                for font in style.text_styles.values_mut() {
+                    font.size *= ACTION_SCALE;
                 }
-                ui.separator();
-                if tool_button(ui, "✎ Edit Tag", "Edit the focused file's tag (F5)").clicked() {
-                    app.open_tag_editor_focused();
-                }
-                if tool_button(ui, "⧉ Copy Tag", "Copy tag (Ctrl+Shift+C)").clicked() {
-                    app.copy_tag();
-                }
-                if tool_button(ui, "⇩ Paste Tag", "Paste tag (Ctrl+Shift+V)").clicked() {
-                    let i = app.focused.into_iter().collect::<Vec<_>>();
-                    app.paste_tag(&i);
-                }
-                ui.separator();
-                if tool_button(ui, "▶ Play", "Play the focused file (Ctrl+P)").clicked() {
-                    if let Some(i) = app.focused {
-                        app.play_file(i);
-                    }
-                }
-                ui.separator();
-                let sub = &mut app.search_subfolders;
-                if ui.checkbox(sub, "Search Subfolders").changed() {
-                    if let Some(folder) = app.folder.clone() {
-                        app.load_folder(&folder);
-                    }
-                }
-                ui.separator();
-                ui.label(RichText::new("Filter by").color(c_text_dim()).size(13.5));
-                egui::ComboBox::from_id_salt("filter_field")
-                    .selected_text(FILTER_FIELDS[app.filter_field])
-                    .width(104.0)
-                    .show_ui(ui, |ui| {
-                        for (i, f) in FILTER_FIELDS.iter().enumerate() {
-                            if ui.selectable_label(app.filter_field == i, *f).clicked() {
-                                app.filter_field = i;
-                            }
+                style.spacing.item_spacing = style.spacing.item_spacing * ACTION_SCALE;
+                style.spacing.button_padding = style.spacing.button_padding * ACTION_SCALE;
+                ui.set_style(style);
+
+                ui.horizontal_wrapped(|ui| {
+                    if compact_tool_button(ui, "↻ Refresh", "Refresh file list (Ctrl+R)").clicked() {
+                        if let Some(folder) = app.folder.clone() {
+                            app.load_folder(&folder);
                         }
-                    });
-                ui.add(
-                    egui::TextEdit::singleline(&mut app.filter_text)
-                        .desired_width(140.0)
-                        .hint_text("filter text"),
-                );
-                if primary_button(ui, "Filter!").clicked() {
-                    // The original applies the filter whatever the text:
-                    // with an empty box, sub_8413fc keeps only files
-                    // whose selected field is empty.
-                    app.filter_active = true;
-                }
-                if ui.button("Show All").clicked() {
-                    app.filter_active = false;
-                    app.filter_text.clear();
-                    app.hide_checked = false;
-                }
-                // The original's caption (ToolbarFilters TBXItem57).
-                if ui.button("Hide Selected Files").clicked() {
-                    app.hide_checked = true;
-                    app.say("Checked files are hidden; use Show All to see everything again.");
-                }
-                ui.separator();
-                ui.label(RichText::new("Folder").color(c_text_dim()).size(13.5));
-                if let Some(folder) = &app.folder {
-                    ui.label(
-                        RichText::new(folder.display().to_string())
-                            .color(c_text_dim())
-                            .size(13.5),
+                    }
+                    ui.separator();
+                    if compact_tool_button(ui, "✎ Edit Tag", "Edit the focused file's tag (F5)").clicked() {
+                        app.open_tag_editor_focused();
+                    }
+                    if compact_tool_button(ui, "⧉ Copy Tag", "Copy tag (Ctrl+Shift+C)").clicked() {
+                        app.copy_tag();
+                    }
+                    if compact_tool_button(ui, "⇩ Paste Tag", "Paste tag (Ctrl+Shift+V)").clicked() {
+                        let i = app.focused.into_iter().collect::<Vec<_>>();
+                        app.paste_tag(&i);
+                    }
+                    ui.separator();
+                    if compact_tool_button(ui, "▶ Play", "Play the focused file (Ctrl+P)").clicked() {
+                        if let Some(i) = app.focused {
+                            app.play_file(i);
+                        }
+                    }
+                    ui.separator();
+                    let sub = &mut app.search_subfolders;
+                    if ui.checkbox(sub, "Search Subfolders").changed() {
+                        if let Some(folder) = app.folder.clone() {
+                            app.load_folder(&folder);
+                        }
+                    }
+                    ui.separator();
+                    ui.label(RichText::new("Filter by").color(c_text_dim()));
+                    egui::ComboBox::from_id_salt("filter_field")
+                        .selected_text(FILTER_FIELDS[app.filter_field])
+                        .width(104.0 * ACTION_SCALE)
+                        .show_ui(ui, |ui| {
+                            for (i, f) in FILTER_FIELDS.iter().enumerate() {
+                                if ui.selectable_label(app.filter_field == i, *f).clicked() {
+                                    app.filter_field = i;
+                                }
+                            }
+                        });
+                    ui.add(
+                        egui::TextEdit::singleline(&mut app.filter_text)
+                            .desired_width(140.0 * ACTION_SCALE)
+                            .hint_text("filter text"),
                     );
-                }
+                    let filter = egui::Button::new(RichText::new("Filter!").color(c_text()).strong())
+                        .fill(c_accent_dim())
+                        .stroke(Stroke::new(1.0, c_accent()));
+                    if ui.add(filter).clicked() {
+                        // The original applies the filter whatever the text:
+                        // with an empty box, sub_8413fc keeps only files
+                        // whose selected field is empty.
+                        app.filter_active = true;
+                    }
+                    if ui.button("Show All").clicked() {
+                        app.filter_active = false;
+                        app.filter_text.clear();
+                        app.hide_checked = false;
+                    }
+                    // The original's caption (ToolbarFilters TBXItem57).
+                    if ui.button("Hide Selected Files").clicked() {
+                        app.hide_checked = true;
+                        app.say("Checked files are hidden; use Show All to see everything again.");
+                    }
+                    // The old trailing "Folder <path>" label is gone: the
+                    // tree's address box already shows the location.
+                });
             });
         });
 }
