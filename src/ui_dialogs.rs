@@ -753,7 +753,7 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Tag&Rename 3.9.15").strong().size(22.0));
+                    ui.label(RichText::new("Tag:Rename 1.0.0").strong().size(22.0));
                     ui.label(
                         RichText::new("Music tag editor — modern dark edition").color(c_text_dim()),
                     );

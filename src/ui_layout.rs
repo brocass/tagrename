@@ -100,14 +100,14 @@ fn window_chrome(root: &mut Ui, ctx: &Context) {
             ui.painter().text(
                 bar.left_center() + egui::vec2(12.0, 0.0),
                 egui::Align2::LEFT_CENTER,
-                "Tag&Rename",
+                "Tag:Rename",
                 caption,
                 c_text(),
             );
             ui.painter().text(
                 bar.left_center() + egui::vec2(100.0, 0.0),
                 egui::Align2::LEFT_CENTER,
-                "3.9.15",
+                "1.0.0",
                 egui::FontId::proportional(12.0),
                 c_text_dim(),
             );

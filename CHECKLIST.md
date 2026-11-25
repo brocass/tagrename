@@ -29,12 +29,12 @@
 # Latest pass: Format Track # rules from the person's guide
 
 -38. Tools > Format Track # now follows the person's guide (attachments/picture-39.png): x gives a plain number ("01" -> "1"), 0x two digits ("1" -> "01"), 00x three digits ("1" -> "001"), xx/xx "01/01" with the checked-file count, and xx two digits with the total removed. x, 0x and 00x keep the total (tools.rs apply, pad_number). Unit test format_track_rules_follow_the_guide passes. mechanics.json "track formats" now cites the guide (estimated: true).
--39. Screenshot check: app/shots/now.png shows the dark-mode Tag&Rename window (not the original).
+-39. Screenshot check: app/shots/now.png shows the dark-mode Tag:Rename window (not the original).
 -40. Not run this pass: rebuild_check and the Craft Anything evidence tools were not in this session. The Format Track menu itself was not opened in a screenshot.
 
 # Latest pass: Windows packaging path
 
--34. Windows packaging: app/package-windows.bat builds the release program and writes dist/TagRename-3.9.15-windows-x64.zip (program, package/README-windows.txt). It has to run on a Windows PC with Rust and the Visual Studio build tools.
+-34. Windows packaging: app/package-windows.bat builds the release program and writes dist/Tag-Rename-1.0.0-windows-x64.zip (program, package/README-windows.txt). It has to run on a Windows PC with Rust and the Visual Studio build tools.
 -35. Windows compile fix: the Play File fallback in ui.rs (play_file) now opens files with the Windows shell and has an explicit type for other platforms; the Windows target compiled past it.
 -36. Cross-compiling from this Linux sandbox did not produce a .exe: the Windows standard library installed, but the final link failed (raw-dylib system libraries not found through the zig linker, and no mingw dlltool). Not solved; the .bat on Windows is the working route.
 -37. Linux build passes (app/build.sh), screenshot run saved app/shots/now.png. mechanics.json is unchanged.
@@ -44,7 +44,7 @@
 -29. Modern Dark is the default theme (theme.rs). Darker dialog and panel surfaces, a softer accent and rounder corners. The old "Dark" palette is renamed; View > Theme keeps the same six entries.
 -30. Open reads the folder on a background thread (ui.rs load_folder, scan_folder_rows). The list fills when the scan lands. Measured: window-thread wait 32 ms to 0 ms on a 1,200-file folder. Tests now wait for the scan (ui.rs and ui_layout.rs settle).
 -31. Release build tuned (Cargo.toml): level 3, thin LTO, one codegen unit, stripped. Debug builds use level 1 with optimised dependencies. A cold release build takes about 5.5 minutes.
--32. Deployable package: app/package.sh writes app/dist/TagRename-3.9.15-linux-x86_64.tar.gz with a checksum. It holds the program, icon, menu entry, install.sh (per user, --uninstall available) and README.txt (package/).
+-32. Deployable package: app/package.sh writes app/dist/tagrename-1.0.0-linux-x86_64.tar.gz with a checksum. It holds the program, icon, menu entry, install.sh (per user, --uninstall available) and README.txt (package/).
 -33. MECHANICS.md and mechanics.json are unchanged: the decompile tools were not in this session, so nothing was re-read (see MECHANICS.md, Pass 12). rebuild_check was not available either.
 
 # Earlier pass: full-screen Tag Editor alignment
