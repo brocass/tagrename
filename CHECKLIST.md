@@ -6,7 +6,12 @@
 # Latest pass: Format Track # xx/xx round trip
 
 -62. Fixed the reported case where Format Track # to 0x skipped files whose track displayed as "01/14". A reader splits that into track "01" plus total "14"; the old comparison only looked at the two halves and the old 0x rule kept the total, so the result looked unchanged and no file was written. x, 0x and 00x now clear the embedded total, and the unchanged check compares the displayed "01/14" pair (tools.rs apply, ui.rs format_track).
--63. xx/xx -> 0x -> xx/xx now round-trips: "01" -> "01/14" -> "01" -> "01/14". Tests: 37 passed, including track_formats_round_trip_between_plain_and_xx_xx and clearing_track_total_removes_the_slash_from_mp3 (which checks the raw ID3v2 TRCK frame). Packages were not rebuilt for this fix yet.
+-63. xx/xx -> 0x -> xx/xx now round-trips at the `apply()` level: "01" -> "01/14" -> "01" -> "01/14". Tests: 37 passed, including track_formats_round_trip_between_plain_and_xx_xx and clearing_track_total_removes_the_slash_from_mp3 (which checks the raw ID3v2 TRCK frame). A second save-path bug was found before packaging; see -64.
+
+# Latest pass: Format Track # xx/xx save
+
+-64. The remaining 9-of-14 symptom came from the MP3 writer: after lofty wrote TrackNumber and TrackTotal, write_id3v2_track_text rewrote TRCK with only the padded number ("01"), silently dropping "/14". So xx/xx never persisted on padded tracks and a later 0x had no total to remove. The raw writer now includes "/total" when Field::TrackTotal is checked. Added saving_xx_xx_keeps_the_total_in_mp3; 38 tests pass.
+-65. Linux package rebuilt and installed with both fixes: dist/tagrename-1.0.0-linux-x86_64.tar.gz SHA-256 7ace6869e589e10f71274d72aa93dc70e2ca3239ced836ed3b59d42a9fc6e727; installed /home/steven/.local/bin/tagrename SHA-256 91bdfedafd847def54db708f5426c7bb968a2206938d850c8bb189fd402e8cfa. An app that was already open keeps the old inode, so it must be restarted to use the fix. Windows packages still need one more rebuild with this save fix.
 
 # Earlier pass: package shell menus and Slab theme
 

@@ -986,6 +986,8 @@ pub fn read_file(path: &Path) -> Option<MusicFile> {
 /// "Error while working with music file: ..." dialog).
 /// lofty stores TrackNumber as a number, so "03" would come back as "3" in
 /// an ID3v2 tag. This writes the TRCK frame as text so the zero is kept.
+/// ID3v2 keeps the total in the same frame ("03/12"), so the caller passes
+/// the complete text, including "/total" when one is set.
 fn write_id3v2_track_text(path: &Path, track: &str) -> Result<(), String> {
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut mpeg = MpegFile::read_from(&mut file, ParseOptions::new()).map_err(|e| e.to_string())?;
@@ -1213,7 +1215,18 @@ pub fn save_fields(path: &Path, fields: &TagFields, checked: &[Field]) -> Result
         });
     let res = res.and_then(|_| match (has(Field::Track), leading_digits(&fields.track)) {
         (true, Some(v)) if v.len() > 1 && v.starts_with('0') && tagged.file_type() == FileType::Mpeg => {
-            write_id3v2_track_text(path, &v)
+            // Keep the leading zero *and* an xx/xx total in the one ID3v2
+            // TRCK frame. Writing only the number here was silently
+            // undoing Format Track # to xx/xx for every padded track.
+            let raw = if has(Field::TrackTotal) {
+                match leading_digits(&fields.track_total) {
+                    Some(total) => format!("{v}/{total}"),
+                    None => v,
+                }
+            } else {
+                v
+            };
+            write_id3v2_track_text(path, &raw)
         }
         _ => Ok(()),
     });
@@ -1470,6 +1483,34 @@ mod track_save_tests {
         let after = read_file(&path).unwrap().fields;
         assert_eq!(after.track, "01");
         assert_eq!(after.track_total, "");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn saving_xx_xx_keeps_the_total_in_mp3() {
+        let path = std::env::temp_dir().join("tagrename-track-total-save-test.mp3");
+        let mut bytes = b"ID3\x04\x00\x00\x00\x00\x00\x00".to_vec();
+        let mut frame = b"TRCK".to_vec();
+        frame.extend_from_slice(&[0, 0, 0, 2, 0, 0, 3, b'1']);
+        bytes[9] = frame.len() as u8;
+        bytes.extend_from_slice(&frame);
+        for _ in 0..400 {
+            bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+            bytes.extend_from_slice(&[0u8; 413]);
+        }
+        std::fs::write(&path, &bytes).unwrap();
+
+        let mut fields = read_file(&path).unwrap().fields;
+        assert_eq!(fields.track, "1");
+        // What Tools > Format Track # to xx/xx produces for track 1.
+        fields.track = "01".into();
+        fields.track_total = "14".into();
+        save_fields(&path, &fields, &[Field::Track, Field::TrackTotal]).unwrap();
+
+        assert_eq!(id3v2_text_frame(&path, b"TRCK").as_deref(), Some("01/14"));
+        let after = read_file(&path).unwrap().fields;
+        assert_eq!(after.track, "01");
+        assert_eq!(after.track_total, "14");
         let _ = std::fs::remove_file(&path);
     }
 
