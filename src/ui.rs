@@ -207,6 +207,12 @@ fn save_roots(roots: &[PathBuf]) {
 
 /// The two file name masks and the saved masks, kept between runs in
 /// masks.txt: one "rename", one "f2t" and one "saved" line per mask.
+/// The mask both file-name tools start with. The original used two
+/// different defaults; the person asked for this single one instead.
+const DEFAULT_FILE_MASK: &str = "%6 - %1 - %2";
+const LEGACY_RENAME_MASK: &str = "%1 - %2";
+const LEGACY_F2T_MASK: &str = "%1-%2";
+
 pub fn load_masks() -> Option<(String, String, Vec<String>)> {
     let file = config_file("masks.txt")?;
     let text = std::fs::read_to_string(file).ok()?;
@@ -225,7 +231,15 @@ pub fn load_masks() -> Option<(String, String, Vec<String>)> {
             }
         }
     }
-    Some((rename.unwrap_or_else(|| "%1 - %2".into()), f2t.unwrap_or_else(|| "%1-%2".into()), saved))
+    // Treat the two old defaults as unset so existing configs pick up the
+    // new default too, while any genuinely custom mask is left alone.
+    let rename = rename.filter(|m| m != LEGACY_RENAME_MASK && m != LEGACY_F2T_MASK);
+    let f2t = f2t.filter(|m| m != LEGACY_RENAME_MASK && m != LEGACY_F2T_MASK);
+    Some((
+        rename.unwrap_or_else(|| DEFAULT_FILE_MASK.into()),
+        f2t.unwrap_or_else(|| DEFAULT_FILE_MASK.into()),
+        saved,
+    ))
 }
 
 fn save_masks(rename: &str, f2t: &str, saved: &[String]) {
@@ -480,7 +494,7 @@ impl App {
 
     pub fn new() -> Self {
         let (rename_mask, f2t_mask, saved_masks) =
-            load_masks().unwrap_or_else(|| ("%1 - %2".into(), "%1-%2".into(), Vec::new()));
+            load_masks().unwrap_or_else(|| (DEFAULT_FILE_MASK.into(), DEFAULT_FILE_MASK.into(), Vec::new()));
         let mut dlg = ui_dialogs::Dialogs::default();
         dlg.saved_masks = saved_masks;
         let files: Vec<MusicFile> = Vec::new();
@@ -532,10 +546,9 @@ impl App {
             multi_values: TagFields::default(),
             multi_case_enabled: false,
             multi_case: 0,
-            // Fresh decompile ev_14d3d4be… (FormCreate sub_c944fc):
-            // 0xc98858 = "%1-%2" goes into form+0x88c, the mask read by the
-            // file-to-tag engine sub_ca4d14; the rename default is
-            // 0xc986dc = "%1 - %2" (with spaces) into form+0x800.
+            // The original's file-to-tag default was "%1-%2" (FormCreate
+            // sub_c944fc), but both file-name tools now start with the
+            // requested "%6 - %1 - %2" mask.
             f2t_mask,
             f2t_case_enabled: false,
             f2t_case: 0,

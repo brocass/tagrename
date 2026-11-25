@@ -84,7 +84,7 @@ pub fn rename_tab(ui: &mut Ui, app: &mut App) {
                     ui.add(egui::Label::new("File name mask:").selectable(false));
                     let edit = egui::TextEdit::singleline(&mut app.rename_mask)
                         .desired_width(150.0)
-                        .hint_text("e.g. %1 - %2");
+                        .hint_text("e.g. %6 - %1 - %2");
                     ui.add(edit);
                     if ui.button("Mask Editor").clicked() {
                         app.dlg.open_mask_editor(0, &app.rename_mask);
@@ -132,7 +132,7 @@ pub fn file_to_tag_tab(ui: &mut Ui, app: &mut App) {
                     ui.add(
                         egui::TextEdit::singleline(&mut app.f2t_mask)
                             .desired_width(150.0)
-                            .hint_text("e.g. %6 %1 - %2"),
+                            .hint_text("e.g. %6 - %1 - %2"),
                     );
                     if ui.button("Mask Editor").clicked() {
                         app.dlg.open_mask_editor(1, &app.f2t_mask);

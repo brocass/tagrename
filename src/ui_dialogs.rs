@@ -1388,7 +1388,7 @@ fn mask_editor(ui: &mut Ui, app: &mut App, which: usize) -> Option<bool> {
             egui::TextEdit::singleline(&mut mask_text)
                 .id(edit_id)
                 .desired_width(ui.available_width())
-                .hint_text("e.g. %1 - %2"),
+                .hint_text("e.g. %6 - %1 - %2"),
         );
     });
     ui.add_space(8.0);
