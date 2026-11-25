@@ -501,6 +501,11 @@ fn menu_frame() -> egui::Frame {
 /// the interface: a quarter less, as the person asked.
 const ACTION_SCALE: f32 = 0.75;
 
+/// Extra vertical gap above and below the controls. Together with the
+/// scaled item spacing this adds ~25% of the strip's height at each edge,
+/// making the panel about half as tall again.
+const ACTION_PAD: f32 = 4.0;
+
 fn compact_tool_button(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
     ui.add(egui::Button::new(label)).on_hover_text(tooltip)
 }
@@ -525,6 +530,7 @@ fn toolbar(app: &mut App, root: &mut Ui, _ctx: &Context) {
                 style.spacing.button_padding = style.spacing.button_padding * ACTION_SCALE;
                 ui.set_style(style);
 
+                ui.add_space(ACTION_PAD);
                 ui.horizontal_wrapped(|ui| {
                     if compact_tool_button(ui, "↻ Refresh", "Refresh file list (Ctrl+R)").clicked() {
                         if let Some(folder) = app.folder.clone() {
@@ -594,6 +600,7 @@ fn toolbar(app: &mut App, root: &mut Ui, _ctx: &Context) {
                     // The old trailing "Folder <path>" label is gone: the
                     // tree's address box already shows the location.
                 });
+                ui.add_space(ACTION_PAD);
             });
         });
 }
