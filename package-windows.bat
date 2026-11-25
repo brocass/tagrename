@@ -1,7 +1,7 @@
 @echo off
 rem Builds the Windows program and packs it for deployment on a Windows PC.
 rem Needs Rust for Windows (https://rustup.rs) with the MSVC build tools.
-rem Output: dist\Tag-Rename-1.0.0-windows-x64.zip (program, README, checksum).
+rem Output: dist\Tag-Rename-1.0.1-windows-x64.zip (program, README, checksum).
 setlocal
 cd /d "%~dp0"
 
@@ -11,7 +11,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set NAME=Tag-Rename-1.0.0-windows-x64
+set NAME=Tag-Rename-1.0.1-windows-x64
 set STAGE=dist\%NAME%
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"

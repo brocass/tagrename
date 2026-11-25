@@ -1,4 +1,4 @@
-Tag:Rename 1.0.0 - modern dark edition (Linux, 64-bit)
+Tag:Rename 1.0.1 - modern dark edition (Linux, 64-bit)
 ======================================================
 
 What is in this folder
@@ -23,5 +23,5 @@ Notes
   - Use View > Appearance to pick a colour scheme (System, Light or Dark) and a theme. Dark is the starting scheme.
   - Right-click a music file (or folder) in your file manager and choose
     Tag:Rename under "Open With" to load that file's whole folder.
-  - On Arch-based systems (such as Omarchy) there is also a package file, tagrename-1.0.0-1-x86_64.pkg.tar.zst,
-    installed with:  sudo pacman -U tagrename-1.0.0-1-x86_64.pkg.tar.zst
+  - On Arch-based systems (such as Omarchy) there is also a package file, tagrename-1.0.1-1-x86_64.pkg.tar.zst,
+    installed with:  sudo pacman -U tagrename-1.0.1-1-x86_64.pkg.tar.zst
