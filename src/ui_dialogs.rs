@@ -144,6 +144,11 @@ struct ThemeEditorState {
     dark: bool,
     dark_fields: ThemeColourFields,
     light_fields: ThemeColourFields,
+    /// Selection before the editor opened, restored when the editor is cancelled.
+    before_theme: usize,
+    before_scheme: usize,
+    /// Whether an unsaved palette has been pushed into the live preview.
+    previewing: bool,
 }
 
 impl ThemeEditorState {
@@ -157,6 +162,20 @@ impl ThemeEditorState {
             dark: self.dark_fields.parse("Dark")?,
             light: self.light_fields.parse("Light")?,
         })
+    }
+
+    /// Push the current colours into the live preview. An incomplete hex
+    /// value leaves the previous preview in place while the person types.
+    fn apply_preview(&mut self, ctx: &egui::Context) {
+        if let (Ok(dark), Ok(light)) =
+            (self.dark_fields.parse("Dark"), self.light_fields.parse("Light"))
+        {
+            theme::preview(
+                ctx,
+                &CustomThemeSpec { name: self.name.clone(), dark, light },
+            );
+            self.previewing = true;
+        }
     }
 }
 
@@ -186,15 +205,25 @@ struct ColourPickerState {
     s: f32,
     v: f32,
     hex: String,
-    /// The value when the picker opened, for the old/new preview.
+    /// The value when the picker opened, for the old/new preview and Cancel.
     before: String,
+    /// Whether the editor was already previewing when the picker opened.
+    previewing_before: bool,
 }
 
 impl ColourPickerState {
-    fn new(slot: ColourSlot, field: &str) -> Self {
+    fn new(slot: ColourSlot, field: &str, previewing_before: bool) -> Self {
         let colour = parse_hex(field).unwrap_or(egui::Color32::GRAY);
         let (h, s, v) = rgb_to_hsv(colour);
-        Self { slot, h, s, v, hex: hex_string(colour), before: field.to_string() }
+        Self {
+            slot,
+            h,
+            s,
+            v,
+            hex: hex_string(colour),
+            before: field.to_string(),
+            previewing_before,
+        }
     }
 
     fn colour(&self) -> egui::Color32 {
@@ -371,6 +400,9 @@ impl Dialogs {
             dark: true,
             dark_fields: ThemeColourFields::from_colours(spec.dark),
             light_fields: ThemeColourFields::from_colours(spec.light),
+            before_theme: theme::theme_index(),
+            before_scheme: theme::scheme_index(),
+            previewing: false,
         });
         self.colour_picker = None;
     }
@@ -388,6 +420,7 @@ impl Dialogs {
         self.colour_picker = Some(ColourPickerState::new(
             ColourSlot { dark, field: field as u8 },
             current,
+            editor.previewing,
         ));
     }
 
@@ -466,6 +499,7 @@ fn appearance_window(ctx: &egui::Context, app: &mut App) {
                 ui.label(appearance_heading("Theme"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if primary_button(ui, "Create theme").clicked() {
+                        theme::clear_preview(ctx);
                         app.dlg.open_theme_editor(cur_theme);
                     }
                     if ui.button("Import").clicked() {
@@ -485,6 +519,7 @@ fn appearance_window(ctx: &egui::Context, app: &mut App) {
                         let k = row * 3 + col;
                         let (picked, edit) = theme_card(ui, w, &t.name, k, cur_theme == k, k >= theme::BUILTIN_COUNT);
                         if edit {
+                            theme::clear_preview(ctx);
                             app.dlg.open_theme_editor(k);
                         } else if picked {
                             pick_theme = k;
@@ -678,14 +713,11 @@ fn with_json_extension(path: PathBuf) -> PathBuf {
     }
 }
 
-/// A swatch and a hex box. Both open the colour picker; the hex value itself
-/// stays editable inside that picker.
-fn colour_row(
-    ui: &mut Ui,
-    field: &mut String,
-    picker: &mut Option<ColourPickerState>,
-    slot: ColourSlot,
-) {
+/// A clickable swatch and a directly editable `#RRGGBB` box.
+/// Returns `(hex_changed, picker_requested)`.
+fn colour_row(ui: &mut Ui, field: &mut String) -> (bool, bool) {
+    let mut changed = false;
+    let mut picker_requested = false;
     ui.horizontal(|ui| {
         let colour = parse_hex(field).unwrap_or(egui::Color32::GRAY);
         let (rect, swatch) = ui.allocate_exact_size(egui::vec2(28.0, 20.0), egui::Sense::click());
@@ -696,18 +728,18 @@ fn colour_row(
             egui::Stroke::new(1.0, c_separator()),
             egui::StrokeKind::Middle,
         );
-        let hex = ui
-            .add(
-                egui::Button::new(
-                    RichText::new(field.as_str()).family(egui::FontFamily::Monospace),
-                )
-                .min_size(egui::vec2(130.0, 20.0)),
-            )
-            .on_hover_text("Click to choose a colour");
-        if swatch.clicked() || hex.clicked() {
-            *picker = Some(ColourPickerState::new(slot, field));
+        if swatch.clicked() {
+            picker_requested = true;
         }
+        let hex = ui.add(
+            egui::TextEdit::singleline(field)
+                .desired_width(130.0)
+                .hint_text("#RRGGBB")
+                .font(egui::TextStyle::Monospace),
+        );
+        changed = hex.changed();
     });
+    (changed, picker_requested)
 }
 
 fn import_theme_json(ctx: &egui::Context, value: &serde_json::Value) -> Result<(usize, usize), String> {
@@ -754,31 +786,60 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
                     primary_button(ui, "Dark");
                 } else if ui.button("Dark").clicked() {
                     editor.dark = true;
+                    editor.apply_preview(ctx);
                 }
                 if !editor.dark {
                     primary_button(ui, "Light");
                 } else if ui.button("Light").clicked() {
                     editor.dark = false;
+                    editor.apply_preview(ctx);
                 }
             });
             ui.add_space(8.0);
             egui::Grid::new("create_theme_colours").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                let slot = ColourSlot { dark: editor.dark, field: 0 };
-                let field = if slot.dark { &mut editor.dark_fields.bg } else { &mut editor.light_fields.bg };
-                ui.label("Background");
-                colour_row(ui, field, &mut picker, slot);
+                let (changed, open_picker) = {
+                    let field = if editor.dark { &mut editor.dark_fields.bg } else { &mut editor.light_fields.bg };
+                    ui.label("Background");
+                    colour_row(ui, field)
+                };
+                if changed { editor.apply_preview(ctx); }
+                if open_picker {
+                    picker = Some(ColourPickerState::new(
+                        ColourSlot { dark: editor.dark, field: 0 },
+                        if editor.dark { &editor.dark_fields.bg } else { &editor.light_fields.bg },
+                        editor.previewing,
+                    ));
+                }
                 ui.end_row();
 
-                let slot = ColourSlot { dark: editor.dark, field: 1 };
-                let field = if slot.dark { &mut editor.dark_fields.text } else { &mut editor.light_fields.text };
-                ui.label("Text");
-                colour_row(ui, field, &mut picker, slot);
+                let (changed, open_picker) = {
+                    let field = if editor.dark { &mut editor.dark_fields.text } else { &mut editor.light_fields.text };
+                    ui.label("Text");
+                    colour_row(ui, field)
+                };
+                if changed { editor.apply_preview(ctx); }
+                if open_picker {
+                    picker = Some(ColourPickerState::new(
+                        ColourSlot { dark: editor.dark, field: 1 },
+                        if editor.dark { &editor.dark_fields.text } else { &editor.light_fields.text },
+                        editor.previewing,
+                    ));
+                }
                 ui.end_row();
 
-                let slot = ColourSlot { dark: editor.dark, field: 2 };
-                let field = if slot.dark { &mut editor.dark_fields.accent } else { &mut editor.light_fields.accent };
-                ui.label("Accent");
-                colour_row(ui, field, &mut picker, slot);
+                let (changed, open_picker) = {
+                    let field = if editor.dark { &mut editor.dark_fields.accent } else { &mut editor.light_fields.accent };
+                    ui.label("Accent");
+                    colour_row(ui, field)
+                };
+                if changed { editor.apply_preview(ctx); }
+                if open_picker {
+                    picker = Some(ColourPickerState::new(
+                        ColourSlot { dark: editor.dark, field: 2 },
+                        if editor.dark { &editor.dark_fields.accent } else { &editor.light_fields.accent },
+                        editor.previewing,
+                    ));
+                }
                 ui.end_row();
             });
             ui.add_space(10.0);
@@ -797,6 +858,7 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
                         } else {
                             editor.light_fields = ThemeColourFields::from_colours(generated);
                         }
+                        editor.apply_preview(ctx);
                     }
                     Err(err) => app.warn(err),
                 }
@@ -822,10 +884,22 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
         });
 
     let mut close = !open;
+    if !open {
+        action = Action::Cancel;
+    }
     match action {
         Action::None => {}
-        Action::Cancel => close = true,
+        Action::Cancel => {
+            if editor.previewing {
+                theme::select(ctx, editor.before_theme, editor.before_scheme);
+            }
+            close = true;
+        }
         Action::Export => {
+            if editor.previewing {
+                theme::select(ctx, editor.before_theme, editor.before_scheme);
+                editor.previewing = false;
+            }
             app.dlg.theme_file = Some(ThemeFileState {
                 purpose: ThemeFilePurpose::Export,
                 path: theme_json_path(&editor.name),
@@ -868,14 +942,16 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
 
 /// The saturation/value square. Dragging chooses saturation (left to right)
 /// and brightness (bottom to top) for the current hue.
-fn saturation_value_square(ui: &mut Ui, picker: &mut ColourPickerState) -> egui::Response {
+fn saturation_value_square(ui: &mut Ui, picker: &mut ColourPickerState) -> (egui::Response, bool) {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(218.0, 150.0), egui::Sense::click_and_drag());
+    let mut changed = false;
     if resp.clicked() || resp.dragged() {
         if let Some(pos) = resp.interact_pointer_pos() {
             let s = (pos.x - rect.min.x) / rect.width();
             let v = 1.0 - (pos.y - rect.min.y) / rect.height();
             picker.set_hsv(picker.h, s, v);
+            changed = true;
         }
     }
     let cols = 56.0_f32;
@@ -902,16 +978,18 @@ fn saturation_value_square(ui: &mut Ui, picker: &mut ColourPickerState) -> egui:
     };
     ui.painter().circle_filled(marker, 6.0, outline);
     ui.painter().circle_stroke(marker, 4.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
-    resp
+    (resp, changed)
 }
 
 /// The vertical hue strip on the right of the square, red at the top.
-fn hue_strip(ui: &mut Ui, picker: &mut ColourPickerState) -> egui::Response {
+fn hue_strip(ui: &mut Ui, picker: &mut ColourPickerState) -> (egui::Response, bool) {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(24.0, 150.0), egui::Sense::click_and_drag());
+    let mut changed = false;
     if resp.clicked() || resp.dragged() {
         if let Some(pos) = resp.interact_pointer_pos() {
             picker.set_hsv((pos.y - rect.min.y) / rect.height(), picker.s, picker.v);
+            changed = true;
         }
     }
     let bands = 90.0_f32;
@@ -931,7 +1009,7 @@ fn hue_strip(ui: &mut Ui, picker: &mut ColourPickerState) -> egui::Response {
         egui::CornerRadius::same(2),
         egui::Color32::WHITE,
     );
-    resp
+    (resp, changed)
 }
 
 fn picker_swatch(ui: &mut Ui, colour: egui::Color32) {
@@ -949,6 +1027,10 @@ fn picker_swatch(ui: &mut Ui, colour: egui::Color32) {
 /// hex and RGB fields, old/new preview, and OK/Cancel.
 fn colour_picker_window(ctx: &egui::Context, app: &mut App) {
     let Some(mut picker) = app.dlg.colour_picker.take() else { return };
+    let Some(mut editor) = app.dlg.theme_editor.take() else {
+        app.dlg.colour_picker = Some(picker);
+        return;
+    };
     enum Action { None, Ok, Cancel }
     let mut action = Action::None;
     let mut open = true;
@@ -959,9 +1041,12 @@ fn colour_picker_window(ctx: &egui::Context, app: &mut App) {
         .default_width(430.0)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(320.0, -30.0))
         .show(ctx, |ui| {
+            let mut changed = false;
             ui.horizontal(|ui| {
-                saturation_value_square(ui, &mut picker);
-                hue_strip(ui, &mut picker);
+                let (_, was_changed) = saturation_value_square(ui, &mut picker);
+                changed |= was_changed;
+                let (_, was_changed) = hue_strip(ui, &mut picker);
+                changed |= was_changed;
             });
             ui.add_space(10.0);
             ui.horizontal(|ui| {
@@ -973,6 +1058,7 @@ fn colour_picker_window(ctx: &egui::Context, app: &mut App) {
                 if response.changed() {
                     if let Some(colour) = parse_hex(&picker.hex) {
                         picker.set_colour(colour);
+                        changed = true;
                     }
                 }
                 ui.add_space(12.0);
@@ -988,9 +1074,14 @@ fn colour_picker_window(ctx: &egui::Context, app: &mut App) {
                     if response.changed() {
                         rgb[index] = value.clamp(0, 255) as u8;
                         picker.set_colour(egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+                        changed = true;
                     }
                 }
             });
+            if changed {
+                *picker.slot.field_mut(&mut editor) = picker.hex.clone();
+                editor.apply_preview(ctx);
+            }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 ui.label("Current");
@@ -1019,18 +1110,22 @@ fn colour_picker_window(ctx: &egui::Context, app: &mut App) {
     let mut close = false;
     match action {
         Action::None => {}
-        Action::Cancel => close = true,
         Action::Ok => match parse_hex(&picker.hex) {
-            Some(colour) => {
-                picker.set_colour(colour);
-                if let Some(editor) = app.dlg.theme_editor.as_mut() {
-                    *picker.slot.field_mut(editor) = picker.hex.clone();
-                }
-                close = true;
-            }
+            Some(_) => close = true,
             None => app.warn("Enter a #RRGGBB colour"),
         },
+        Action::Cancel => {
+            *picker.slot.field_mut(&mut editor) = picker.before.clone();
+            if picker.previewing_before {
+                editor.apply_preview(ctx);
+            } else {
+                theme::clear_preview(ctx);
+                editor.previewing = false;
+            }
+            close = true;
+        }
     }
+    app.dlg.theme_editor = Some(editor);
     if close {
         app.dlg.colour_picker = None;
     } else {
@@ -1485,7 +1580,7 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Tag:Rename 1.1.1").strong().size(22.0));
+                    ui.label(RichText::new("Tag:Rename 1.1.2").strong().size(22.0));
                     ui.label(
                         RichText::new("Music tag editor — modern dark edition").color(c_text_dim()),
                     );
@@ -2271,6 +2366,9 @@ mod tests {
             dark: true,
             dark_fields: ThemeColourFields::from_colours(spec.dark),
             light_fields: ThemeColourFields::from_colours(spec.light),
+            before_theme: 0,
+            before_scheme: theme::SCHEME_DARK,
+            previewing: false,
         };
         *ColourSlot { dark: false, field: 1 }.field_mut(&mut editor) = "#123456".into();
         assert_eq!(editor.light_fields.text, "#123456");

@@ -312,6 +312,10 @@ pub fn theme_count() -> usize {
     list().read().unwrap_or_else(|e| e.into_inner()).len()
 }
 
+/// A temporary theme used while Create theme is open, so colour edits are
+/// visible before Save. It is never written to the theme list or to disk.
+static PREVIEW: RwLock<Option<Theme>> = RwLock::new(None);
+
 static THEME: AtomicUsize = AtomicUsize::new(0);
 static SCHEME: AtomicUsize = AtomicUsize::new(SCHEME_DARK);
 /// What the operating system asked for last time we looked. Used when the
@@ -340,8 +344,39 @@ pub fn palette_of(theme: usize, dark: bool) -> Palette {
     if dark { t.dark } else { t.light }
 }
 
+fn active_palette(dark: bool) -> Palette {
+    if let Ok(guard) = PREVIEW.read() {
+        if let Some(theme) = guard.as_ref() {
+            return if dark { theme.dark } else { theme.light };
+        }
+    }
+    palette_of(theme_index(), dark)
+}
+
 pub fn pal() -> Palette {
-    palette_of(theme_index(), is_dark())
+    active_palette(is_dark())
+}
+
+/// Show an unsaved custom theme immediately, without changing the saved
+/// selection or themes.json. Used while the Create theme panel is open.
+pub fn preview(ctx: &Context, spec: &CustomThemeSpec) {
+    let theme = Theme {
+        name: Cow::Borrowed("Preview"),
+        dark: custom_palette(true, spec.dark),
+        light: custom_palette(false, spec.light),
+    };
+    if let Ok(mut guard) = PREVIEW.write() {
+        *guard = Some(theme);
+    }
+    install(ctx);
+}
+
+/// Drop the unsaved preview and restore the selected theme.
+pub fn clear_preview(ctx: &Context) {
+    let had = if let Ok(mut guard) = PREVIEW.write() { guard.take().is_some() } else { false };
+    if had {
+        install(ctx);
+    }
 }
 
 pub fn c_bg() -> Color32 { pal().bg }
@@ -363,6 +398,9 @@ pub fn c_header() -> Color32 { pal().header }
 
 /// Switch theme and colour scheme and restyle the window straight away.
 pub fn select(ctx: &Context, theme: usize, scheme: usize) {
+    if let Ok(mut guard) = PREVIEW.write() {
+        *guard = None;
+    }
     THEME.store(theme.min(theme_count() - 1), Ordering::Relaxed);
     SCHEME.store(scheme.min(SCHEME_DARK), Ordering::Relaxed);
     install(ctx);
@@ -727,6 +765,37 @@ mod tests {
         for t in super::themes() {
             assert!(!t.light.dark && t.dark.dark, "{}", t.name);
         }
+    }
+
+    #[test]
+    fn an_unsaved_preview_overrides_then_clears() {
+        let _guard = locked();
+        let original = super::pal();
+        let spec = super::CustomThemeSpec {
+            name: "Preview test".into(),
+            dark: super::ThemeColours {
+                bg: super::hex(0x101820),
+                text: super::hex(0xdceeff),
+                accent: super::hex(0x4fc3f7),
+            },
+            light: super::ThemeColours {
+                bg: super::hex(0xe8f2f7),
+                text: super::hex(0x17222b),
+                accent: super::hex(0x0277bd),
+            },
+        };
+        if let Ok(mut guard) = super::PREVIEW.write() {
+            *guard = Some(super::Theme {
+                name: "Preview".into(),
+                dark: super::custom_palette(true, spec.dark),
+                light: super::custom_palette(false, spec.light),
+            });
+        }
+        assert_eq!(super::pal().bg, spec.dark.bg);
+        if let Ok(mut guard) = super::PREVIEW.write() {
+            *guard = None;
+        }
+        assert_eq!(super::pal().bg, original.bg);
     }
 
     #[test]

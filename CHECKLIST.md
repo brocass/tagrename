@@ -1,4 +1,12 @@
-# Latest pass: version 1.1.1 Linux package
+# Latest pass: version 1.1.2 Linux package
+
+-81. The hex colour boxes in Create theme are editable again; only their swatches open the in-app Colour picker. Editing a hex value, dragging in the picker, using its RGB fields, switching Dark/Light, or generating opposing colours now previews that palette in the whole app immediately (theme.rs preview/clear_preview, ui_dialogs.rs).
+-82. Cancelling Create theme, closing it with its X, exporting while it is open, or cancelling the Colour picker restores the palette that was active before the change. Save/Remove keep the new palette. Preview is never written to themes.json.
+-83. The new icon is now also drawn in the app's own title bar beside "Tag:Rename", so the updated artwork is visible even where the desktop shell caches launcher icons. Installed hicolor PNG/SVG assets still match the regenerated files byte for byte.
+-84. Version bumped to 1.1.2 everywhere visible. cargo test passes 45/45. Linux package rebuilt and installed at the person's request: dist/tagrename-1.1.2-linux-x86_64.tar.gz SHA-256 0bf788302c5b508b2c7315ca29d6319f0656f1bfa97495126fa7bcd654af4b45; installed /home/steven/.local/bin/tagrename SHA-256 a276d7292b8e7470949f10f62cc7f021b292e6305d30c8ba9b162482cb1da610. The binary contains "Tag:Rename 1.1.2", and a screenshot run showed the editable hex boxes in the Create theme panel.
+-85. Windows packages remain at 1.1.0 (not rebuilt). The Windows build tree and host rebuild/verify scripts were synced to 1.1.2 for a later VM rebuild.
+
+# Earlier pass: version 1.1.1 Linux package
 
 -76. Clicking either a hex colour box or its swatch in Create theme now opens an in-app Photoshop-style Colour picker: saturation/value square, vertical hue strip, hex and RGB fields, old/new swatches, and OK/Cancel. HSV conversions round-trip every `#RRGGBB` value, and the picker targets the exact dark/light field it was opened from (ui_dialogs.rs).
 -77. Custom theme cards no longer draw the enabled tick — the accent border already shows selection. Custom cards instead have a small pencil at the top right; clicking it opens that theme in Create theme, where it can be edited, exported or removed. Built-in cards keep the tick (ui_dialogs.rs).

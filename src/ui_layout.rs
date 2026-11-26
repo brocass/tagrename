@@ -99,18 +99,27 @@ fn window_chrome(root: &mut Ui, ctx: &Context) {
             if drag.double_clicked() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
             }
+            let icon = egui::Image::from_bytes(
+                "bytes://tagrename-title-icon",
+                include_bytes!("../assets/tagrename-256.png"),
+            )
+            .fit_to_exact_size(egui::vec2(14.0, 14.0));
+            ui.put(
+                egui::Rect::from_center_size(bar.left_center() + egui::vec2(16.0, 0.0), egui::vec2(14.0, 14.0)),
+                icon,
+            );
             let caption = egui::FontId::new(13.0, egui::FontFamily::Name("semibold".into()));
             ui.painter().text(
-                bar.left_center() + egui::vec2(12.0, 0.0),
+                bar.left_center() + egui::vec2(30.0, 0.0),
                 egui::Align2::LEFT_CENTER,
                 "Tag:Rename",
                 caption,
                 c_text(),
             );
             ui.painter().text(
-                bar.left_center() + egui::vec2(100.0, 0.0),
+                bar.left_center() + egui::vec2(118.0, 0.0),
                 egui::Align2::LEFT_CENTER,
-                "1.1.1",
+                "1.1.2",
                 egui::FontId::proportional(12.0),
                 c_text_dim(),
             );
