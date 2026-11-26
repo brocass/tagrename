@@ -1,8 +1,8 @@
 # Maintainer: Tag:Rename
 # Builds and installs Tag:Rename on Arch-based systems (such as Omarchy).
-#   cd app && makepkg -f --noconfirm && sudo pacman -U tagrename-1.1.0-1-x86_64.pkg.tar.zst
+#   cd app && makepkg -f --noconfirm && sudo pacman -U tagrename-1.1.1-1-x86_64.pkg.tar.zst
 pkgname=tagrename
-pkgver=1.1.0
+pkgver=1.1.1
 pkgrel=1
 pkgdesc="Tag:Rename - a modern dark-mode music tag editor and file renamer"
 arch=('x86_64')

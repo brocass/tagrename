@@ -261,6 +261,20 @@ fn main() -> eframe::Result<()> {
                 if std::env::var("TAGRENAME_CREATE_THEME").is_ok() {
                     app.dlg.open_theme_editor(theme::theme_index());
                 }
+                // Verification knob: open the Create theme panel with the colour
+                // picker over one box. Accepts dark-bg/text/accent or light-*.
+                if let Ok(which) = std::env::var("TAGRENAME_COLOR_PICKER") {
+                    app.dlg.open_theme_editor(theme::theme_index());
+                    let (dark, field) = match which.trim() {
+                        "dark-bg" => (true, 0),
+                        "dark-text" => (true, 1),
+                        "light-bg" => (false, 0),
+                        "light-text" => (false, 1),
+                        "light-accent" => (false, 2),
+                        _ => (true, 2),
+                    };
+                    app.dlg.open_theme_colour_picker(dark, field);
+                }
                 // Verification knob: open the Mask Editor (0 = rename mask,
                 // 1 = file-name-to-tag mask) for a screenshot.
                 if let Ok(m) = std::env::var("TAGRENAME_MASK") {

@@ -160,6 +160,100 @@ impl ThemeEditorState {
     }
 }
 
+/// One of the three editable colour boxes in the Create theme panel.
+#[derive(Clone, Copy)]
+struct ColourSlot {
+    dark: bool,
+    /// 0 = background, 1 = text, 2 = accent.
+    field: u8,
+}
+
+impl ColourSlot {
+    fn field_mut<'a>(self, editor: &'a mut ThemeEditorState) -> &'a mut String {
+        let fields = if self.dark { &mut editor.dark_fields } else { &mut editor.light_fields };
+        match self.field {
+            0 => &mut fields.bg,
+            1 => &mut fields.text,
+            _ => &mut fields.accent,
+        }
+    }
+}
+
+/// State for the in-app colour picker opened by a hex colour box.
+struct ColourPickerState {
+    slot: ColourSlot,
+    h: f32,
+    s: f32,
+    v: f32,
+    hex: String,
+    /// The value when the picker opened, for the old/new preview.
+    before: String,
+}
+
+impl ColourPickerState {
+    fn new(slot: ColourSlot, field: &str) -> Self {
+        let colour = parse_hex(field).unwrap_or(egui::Color32::GRAY);
+        let (h, s, v) = rgb_to_hsv(colour);
+        Self { slot, h, s, v, hex: hex_string(colour), before: field.to_string() }
+    }
+
+    fn colour(&self) -> egui::Color32 {
+        hsv_to_colour(self.h, self.s, self.v)
+    }
+
+    fn set_hsv(&mut self, h: f32, s: f32, v: f32) {
+        self.h = h.clamp(0.0, 1.0);
+        self.s = s.clamp(0.0, 1.0);
+        self.v = v.clamp(0.0, 1.0);
+        self.hex = hex_string(self.colour());
+    }
+
+    fn set_colour(&mut self, colour: egui::Color32) {
+        let (h, s, v) = rgb_to_hsv(colour);
+        self.set_hsv(h, s, v);
+    }
+}
+
+/// HSV values here use gamma-space RGB bytes, matching the `#RRGGBB` boxes.
+fn rgb_to_hsv(colour: egui::Color32) -> (f32, f32, f32) {
+    let r = colour.r() as f32 / 255.0;
+    let g = colour.g() as f32 / 255.0;
+    let b = colour.b() as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let h = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / delta).rem_euclid(6.0) / 6.0
+    } else if max == g {
+        ((b - r) / delta + 2.0) / 6.0
+    } else {
+        ((r - g) / delta + 4.0) / 6.0
+    };
+    let s = if max == 0.0 { 0.0 } else { delta / max };
+    (h, s, max)
+}
+
+fn hsv_to_colour(h: f32, s: f32, v: f32) -> egui::Color32 {
+    let h = h.clamp(0.0, 1.0).rem_euclid(1.0) * 6.0;
+    let sector = h.floor() as u32 % 6;
+    let f = h - h.floor();
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - f * s);
+    let t = v * (1.0 - (1.0 - f) * s);
+    let (r, g, b) = match sector {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    let byte = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    egui::Color32::from_rgb(byte(r), byte(g), byte(b))
+}
+
 pub struct Dialogs {
     pub tag_editor: Option<crate::ui_tageditor::TagEditor>,
     /// The Tag Editor's size when it is not full screen; kept while the
@@ -186,6 +280,7 @@ pub struct Dialogs {
     pub show_find: bool,
     pub show_appearance: bool,
     pub theme_editor: Option<ThemeEditorState>,
+    pub colour_picker: Option<ColourPickerState>,
     pub theme_file: Option<ThemeFileState>,
     pub find_text: String,
     pub find_match_case: bool,
@@ -231,6 +326,7 @@ impl Default for Dialogs {
             show_find: false,
             show_appearance: false,
             theme_editor: None,
+            colour_picker: None,
             theme_file: None,
             find_text: String::new(),
             find_match_case: false,
@@ -276,6 +372,23 @@ impl Dialogs {
             dark_fields: ThemeColourFields::from_colours(spec.dark),
             light_fields: ThemeColourFields::from_colours(spec.light),
         });
+        self.colour_picker = None;
+    }
+
+    /// Open the picker for one of the Create theme colour boxes.
+    pub fn open_theme_colour_picker(&mut self, dark: bool, field: usize) {
+        let Some(editor) = self.theme_editor.as_ref() else { return };
+        let field = field.min(2);
+        let fields = if dark { &editor.dark_fields } else { &editor.light_fields };
+        let current = match field {
+            0 => &fields.bg,
+            1 => &fields.text,
+            _ => &fields.accent,
+        };
+        self.colour_picker = Some(ColourPickerState::new(
+            ColourSlot { dark, field: field as u8 },
+            current,
+        ));
     }
 
     fn take_results(&mut self) -> Vec<crate::ui_tageditor::EditorResult> {
@@ -370,7 +483,10 @@ fn appearance_window(ctx: &egui::Context, app: &mut App) {
                     ui.spacing_mut().item_spacing.x = gap;
                     for (col, t) in chunk.iter().enumerate() {
                         let k = row * 3 + col;
-                        if theme_card(ui, w, &t.name, k, cur_theme == k, k >= theme::BUILTIN_COUNT).clicked() {
+                        let (picked, edit) = theme_card(ui, w, &t.name, k, cur_theme == k, k >= theme::BUILTIN_COUNT);
+                        if edit {
+                            app.dlg.open_theme_editor(k);
+                        } else if picked {
                             pick_theme = k;
                         }
                     }
@@ -469,7 +585,14 @@ fn scheme_card(ui: &mut Ui, w: f32, scheme: usize, theme: usize, selected: bool)
     resp
 }
 
-fn theme_card(ui: &mut Ui, w: f32, name: &str, k: usize, selected: bool, custom: bool) -> egui::Response {
+fn theme_card(
+    ui: &mut Ui,
+    w: f32,
+    name: &str,
+    k: usize,
+    selected: bool,
+    custom: bool,
+) -> (bool, bool) {
     let (resp, rect) = appearance_card(ui, egui::vec2(w, 60.0), selected);
     let p = pal();
     let sw = palette_of(k, is_dark());
@@ -497,16 +620,40 @@ fn theme_card(ui: &mut Ui, w: f32, name: &str, k: usize, selected: bool, custom:
         egui::FontId::proportional(12.0),
         p.text_dim,
     );
-    if selected {
-        ui.painter().text(
-            rect.max - egui::vec2(12.0, 30.0),
-            egui::Align2::CENTER_CENTER,
-            "✓",
-            egui::FontId::proportional(14.0),
-            p.accent,
+
+    // Custom themes are selected by the border alone; their right-hand mark
+    // is an edit pencil that opens the Create theme panel for editing/removal.
+    let edit = if custom {
+        let centre = rect.max - egui::vec2(15.0, 13.0);
+        let edit_rect = egui::Rect::from_center_size(centre, egui::vec2(22.0, 22.0));
+        let edit_resp = ui.interact(edit_rect, ui.id().with(("theme_edit", k)), egui::Sense::click());
+        let colour = if edit_resp.hovered() { p.accent } else { p.text_dim };
+        let tip = centre + egui::vec2(-5.0, 5.0);
+        let tail = centre + egui::vec2(4.0, -4.0);
+        ui.painter().line_segment([tip, tail], egui::Stroke::new(2.5, colour));
+        ui.painter().line_segment(
+            [tip + egui::vec2(1.5, 1.5), tail + egui::vec2(1.5, -1.5)],
+            egui::Stroke::new(1.5, colour),
         );
-    }
-    resp
+        ui.painter().line_segment(
+            [centre + egui::vec2(2.0, -6.5), centre + egui::vec2(6.0, -2.5)],
+            egui::Stroke::new(2.5, colour),
+        );
+        ui.painter().circle_filled(tip, 1.5, colour);
+        edit_resp.clicked()
+    } else {
+        if selected {
+            ui.painter().text(
+                rect.max - egui::vec2(12.0, 30.0),
+                egui::Align2::CENTER_CENTER,
+                "✓",
+                egui::FontId::proportional(14.0),
+                p.accent,
+            );
+        }
+        false
+    };
+    (resp.clicked(), edit)
 }
 
 /// Default location for an exported/imported theme file, in the app's
@@ -531,10 +678,17 @@ fn with_json_extension(path: PathBuf) -> PathBuf {
     }
 }
 
-fn colour_row(ui: &mut Ui, field: &mut String) {
+/// A swatch and a hex box. Both open the colour picker; the hex value itself
+/// stays editable inside that picker.
+fn colour_row(
+    ui: &mut Ui,
+    field: &mut String,
+    picker: &mut Option<ColourPickerState>,
+    slot: ColourSlot,
+) {
     ui.horizontal(|ui| {
         let colour = parse_hex(field).unwrap_or(egui::Color32::GRAY);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(28.0, 20.0), egui::Sense::hover());
+        let (rect, swatch) = ui.allocate_exact_size(egui::vec2(28.0, 20.0), egui::Sense::click());
         ui.painter().rect_filled(rect, egui::CornerRadius::same(5), colour);
         ui.painter().rect_stroke(
             rect,
@@ -542,7 +696,17 @@ fn colour_row(ui: &mut Ui, field: &mut String) {
             egui::Stroke::new(1.0, c_separator()),
             egui::StrokeKind::Middle,
         );
-        ui.add(egui::TextEdit::singleline(field).desired_width(130.0).hint_text("#RRGGBB"));
+        let hex = ui
+            .add(
+                egui::Button::new(
+                    RichText::new(field.as_str()).family(egui::FontFamily::Monospace),
+                )
+                .min_size(egui::vec2(130.0, 20.0)),
+            )
+            .on_hover_text("Click to choose a colour");
+        if swatch.clicked() || hex.clicked() {
+            *picker = Some(ColourPickerState::new(slot, field));
+        }
     });
 }
 
@@ -569,6 +733,7 @@ fn import_theme_json(ctx: &egui::Context, value: &serde_json::Value) -> Result<(
 /// a generate-opposing-colours action, and the bottom action row.
 fn create_theme_window(ctx: &egui::Context, app: &mut App) {
     let Some(mut editor) = app.dlg.theme_editor.take() else { return };
+    let mut picker = app.dlg.colour_picker.take();
     enum Action { None, Save, Remove, Cancel, Export }
     let mut action = Action::None;
     let mut open = true;
@@ -598,31 +763,22 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
             });
             ui.add_space(8.0);
             egui::Grid::new("create_theme_colours").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                let (label, field) = if editor.dark {
-                    ("Background", &mut editor.dark_fields.bg)
-                } else {
-                    ("Background", &mut editor.light_fields.bg)
-                };
-                ui.label(label);
-                colour_row(ui, field);
+                let slot = ColourSlot { dark: editor.dark, field: 0 };
+                let field = if slot.dark { &mut editor.dark_fields.bg } else { &mut editor.light_fields.bg };
+                ui.label("Background");
+                colour_row(ui, field, &mut picker, slot);
                 ui.end_row();
 
-                let (label, field) = if editor.dark {
-                    ("Text", &mut editor.dark_fields.text)
-                } else {
-                    ("Text", &mut editor.light_fields.text)
-                };
-                ui.label(label);
-                colour_row(ui, field);
+                let slot = ColourSlot { dark: editor.dark, field: 1 };
+                let field = if slot.dark { &mut editor.dark_fields.text } else { &mut editor.light_fields.text };
+                ui.label("Text");
+                colour_row(ui, field, &mut picker, slot);
                 ui.end_row();
 
-                let (label, field) = if editor.dark {
-                    ("Accent", &mut editor.dark_fields.accent)
-                } else {
-                    ("Accent", &mut editor.light_fields.accent)
-                };
-                ui.label(label);
-                colour_row(ui, field);
+                let slot = ColourSlot { dark: editor.dark, field: 2 };
+                let field = if slot.dark { &mut editor.dark_fields.accent } else { &mut editor.light_fields.accent };
+                ui.label("Accent");
+                colour_row(ui, field, &mut picker, slot);
                 ui.end_row();
             });
             ui.add_space(10.0);
@@ -674,6 +830,7 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
                 purpose: ThemeFilePurpose::Export,
                 path: theme_json_path(&editor.name),
             });
+            picker = None;
             close = false;
         }
         Action::Save => match editor.spec() {
@@ -701,8 +858,183 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
             }
         }
     }
-    if !close {
+    if close {
+        app.dlg.colour_picker = None;
+    } else {
         app.dlg.theme_editor = Some(editor);
+        app.dlg.colour_picker = picker;
+    }
+}
+
+/// The saturation/value square. Dragging chooses saturation (left to right)
+/// and brightness (bottom to top) for the current hue.
+fn saturation_value_square(ui: &mut Ui, picker: &mut ColourPickerState) -> egui::Response {
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(218.0, 150.0), egui::Sense::click_and_drag());
+    if resp.clicked() || resp.dragged() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let s = (pos.x - rect.min.x) / rect.width();
+            let v = 1.0 - (pos.y - rect.min.y) / rect.height();
+            picker.set_hsv(picker.h, s, v);
+        }
+    }
+    let cols = 56.0_f32;
+    let rows = 38.0_f32;
+    let cell = egui::vec2(rect.width() / cols, rect.height() / rows);
+    for row in 0..rows as u32 {
+        let v = 1.0 - (row as f32 + 0.5) / rows;
+        for col in 0..cols as u32 {
+            let s = (col as f32 + 0.5) / cols;
+            let min = rect.min + cell * egui::vec2(col as f32, row as f32);
+            let cell_rect = egui::Rect::from_min_size(min, cell);
+            ui.painter()
+                .rect_filled(cell_rect, egui::CornerRadius::same(0), hsv_to_colour(picker.h, s, v));
+        }
+    }
+    let marker = egui::pos2(
+        rect.min.x + picker.s * rect.width(),
+        rect.min.y + (1.0 - picker.v) * rect.height(),
+    );
+    let outline = if picker.v > 0.55 {
+        egui::Color32::from_gray(30)
+    } else {
+        egui::Color32::WHITE
+    };
+    ui.painter().circle_filled(marker, 6.0, outline);
+    ui.painter().circle_stroke(marker, 4.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
+    resp
+}
+
+/// The vertical hue strip on the right of the square, red at the top.
+fn hue_strip(ui: &mut Ui, picker: &mut ColourPickerState) -> egui::Response {
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(24.0, 150.0), egui::Sense::click_and_drag());
+    if resp.clicked() || resp.dragged() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            picker.set_hsv((pos.y - rect.min.y) / rect.height(), picker.s, picker.v);
+        }
+    }
+    let bands = 90.0_f32;
+    let band = rect.height() / bands;
+    for i in 0..bands as u32 {
+        let h = (i as f32 + 0.5) / bands;
+        let band_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.min.x, rect.min.y + band * i as f32),
+            egui::vec2(rect.width(), band),
+        );
+        ui.painter()
+            .rect_filled(band_rect, egui::CornerRadius::same(0), hsv_to_colour(h, 1.0, 1.0));
+    }
+    let y = rect.min.y + picker.h * rect.height();
+    ui.painter().rect_filled(
+        egui::Rect::from_min_size(egui::pos2(rect.min.x - 3.0, y - 1.5), egui::vec2(rect.width() + 6.0, 3.0)),
+        egui::CornerRadius::same(2),
+        egui::Color32::WHITE,
+    );
+    resp
+}
+
+fn picker_swatch(ui: &mut Ui, colour: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(28.0, 20.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, egui::CornerRadius::same(5), colour);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(5),
+        egui::Stroke::new(1.0, c_separator()),
+        egui::StrokeKind::Middle,
+    );
+}
+
+/// A small Photoshop-style colour picker: saturation/value square, hue strip,
+/// hex and RGB fields, old/new preview, and OK/Cancel.
+fn colour_picker_window(ctx: &egui::Context, app: &mut App) {
+    let Some(mut picker) = app.dlg.colour_picker.take() else { return };
+    enum Action { None, Ok, Cancel }
+    let mut action = Action::None;
+    let mut open = true;
+    egui::Window::new("Colour picker")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .default_width(430.0)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(320.0, -30.0))
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                saturation_value_square(ui, &mut picker);
+                hue_strip(ui, &mut picker);
+            });
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.label("Hex");
+                let response = ui.add_sized(
+                    egui::vec2(110.0, 20.0),
+                    egui::TextEdit::singleline(&mut picker.hex).hint_text("#RRGGBB"),
+                );
+                if response.changed() {
+                    if let Some(colour) = parse_hex(&picker.hex) {
+                        picker.set_colour(colour);
+                    }
+                }
+                ui.add_space(12.0);
+                ui.label("RGB");
+                let mut rgb = [picker.colour().r(), picker.colour().g(), picker.colour().b()];
+                for (index, label) in ["R", "G", "B"].iter().enumerate() {
+                    ui.label(*label);
+                    let mut value = rgb[index] as i32;
+                    let response = ui.add_sized(
+                        egui::vec2(54.0, 20.0),
+                        egui::DragValue::new(&mut value).speed(1.0).range(0..=255),
+                    );
+                    if response.changed() {
+                        rgb[index] = value.clamp(0, 255) as u8;
+                        picker.set_colour(egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+                    }
+                }
+            });
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.label("Current");
+                picker_swatch(ui, parse_hex(&picker.before).unwrap_or(egui::Color32::GRAY));
+                ui.add_space(18.0);
+                ui.label("New");
+                picker_swatch(ui, picker.colour());
+            });
+            ui.add_space(10.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if primary_button(ui, "OK").clicked() {
+                        action = Action::Ok;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        action = Action::Cancel;
+                    }
+                });
+            });
+        });
+
+    if !open {
+        action = Action::Cancel;
+    }
+    let mut close = false;
+    match action {
+        Action::None => {}
+        Action::Cancel => close = true,
+        Action::Ok => match parse_hex(&picker.hex) {
+            Some(colour) => {
+                picker.set_colour(colour);
+                if let Some(editor) = app.dlg.theme_editor.as_mut() {
+                    *picker.slot.field_mut(editor) = picker.hex.clone();
+                }
+                close = true;
+            }
+            None => app.warn("Enter a #RRGGBB colour"),
+        },
+    }
+    if close {
+        app.dlg.colour_picker = None;
+    } else {
+        app.dlg.colour_picker = Some(picker);
     }
 }
 
@@ -1060,6 +1392,9 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
     if app.dlg.theme_editor.is_some() {
         create_theme_window(ctx, app);
     }
+    if app.dlg.colour_picker.is_some() {
+        colour_picker_window(ctx, app);
+    }
     if app.dlg.theme_file.is_some() {
         theme_file_window(ctx, app);
     }
@@ -1150,7 +1485,7 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Tag:Rename 1.1.0").strong().size(22.0));
+                    ui.label(RichText::new("Tag:Rename 1.1.1").strong().size(22.0));
                     ui.label(
                         RichText::new("Music tag editor — modern dark edition").color(c_text_dim()),
                     );
@@ -1912,4 +2247,34 @@ fn mask_editor(ui: &mut Ui, app: &mut App, which: usize) -> Option<bool> {
         });
     });
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hsv_round_trips_hex_colours() {
+        for raw in ["#000000", "#FFFFFF", "#FF0000", "#5B8CFF", "#2F2F2F"] {
+            let colour = parse_hex(raw).unwrap();
+            let (h, s, v) = rgb_to_hsv(colour);
+            assert_eq!(hex_string(hsv_to_colour(h, s, v)), hex_string(colour));
+        }
+    }
+
+    #[test]
+    fn colour_picker_slot_targets_the_requested_field() {
+        let spec = theme::default_custom_spec();
+        let mut editor = ThemeEditorState {
+            origin: None,
+            name: "Test".into(),
+            dark: true,
+            dark_fields: ThemeColourFields::from_colours(spec.dark),
+            light_fields: ThemeColourFields::from_colours(spec.light),
+        };
+        *ColourSlot { dark: false, field: 1 }.field_mut(&mut editor) = "#123456".into();
+        assert_eq!(editor.light_fields.text, "#123456");
+        *ColourSlot { dark: true, field: 2 }.field_mut(&mut editor) = "#ABCDEF".into();
+        assert_eq!(editor.dark_fields.accent, "#ABCDEF");
+    }
 }

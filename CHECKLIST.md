@@ -1,4 +1,12 @@
-# Latest pass: version 1.1.0 Linux package
+# Latest pass: version 1.1.1 Linux package
+
+-76. Clicking either a hex colour box or its swatch in Create theme now opens an in-app Photoshop-style Colour picker: saturation/value square, vertical hue strip, hex and RGB fields, old/new swatches, and OK/Cancel. HSV conversions round-trip every `#RRGGBB` value, and the picker targets the exact dark/light field it was opened from (ui_dialogs.rs).
+-77. Custom theme cards no longer draw the enabled tick — the accent border already shows selection. Custom cards instead have a small pencil at the top right; clicking it opens that theme in Create theme, where it can be edited, exported or removed. Built-in cards keep the tick (ui_dialogs.rs).
+-78. The app icon was replaced from /home/steven/Documents/tagrename2.svg: tagrename.svg plus 16/32/48/64/128/256/512 PNGs and a six-size ICO were regenerated in assets/. The installed 256 PNG and scalable SVG match those assets byte for byte.
+-79. Version bumped to 1.1.1 in the title bar/About dialog, Cargo files, package READMEs, PKGBUILD, package-windows.bat and tagrename-installer.iss. cargo test passes 44/44. Linux package rebuilt and installed at the person's request: dist/tagrename-1.1.1-linux-x86_64.tar.gz SHA-256 8790d06d19b425be37b654831c0a754d880221606e7bc0121ed99a8a66a228fa; installed /home/steven/.local/bin/tagrename SHA-256 ba5fc4122370085ecd2879c5909f89fd2cd7d2695d871105d77ca7927b901b3f. The binary contains "Tag:Rename 1.1.1", and a screenshot run opened the colour picker over the Create theme panel.
+-80. Windows packages remain at 1.1.0 as requested (not rebuilt). The Windows build tree and host rebuild/verify scripts were synced to 1.1.1 for a later VM rebuild.
+
+# Earlier pass: version 1.1.0 Linux package
 
 -73. Version bumped to 1.1.0 for the custom-theme feature and Slab light-text change. Updated Cargo.toml/Cargo.lock, the title bar and About dialog, both package READMEs, PKGBUILD, package-windows.bat, tagrename-installer.iss and the Windows host rebuild/verify scripts. cargo test passes 42/42.
 -74. Linux package rebuilt and installed at the person's request: dist/tagrename-1.1.0-linux-x86_64.tar.gz SHA-256 0fd3aa856be4b981696e9a35acd7ca1cdb135068f340a8cd924c26627743cfff; installed /home/steven/.local/bin/tagrename SHA-256 4c35862abe49dce6d8138c9a41fc2aefbb29dd8be8d198a4e2433c698fe161a4. The binary contains "Tag:Rename 1.1.0", and a screenshot run opened the Appearance window showing the Import and Create theme buttons.
