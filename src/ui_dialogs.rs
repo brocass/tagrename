@@ -408,6 +408,23 @@ impl Dialogs {
         self.colour_picker = None;
     }
 
+    /// Open the Create theme panel for a brand new theme, using the selected
+    /// theme only as a starting palette. Never edits or removes that theme.
+    pub fn open_new_theme_editor(&mut self, index: usize) {
+        let spec = theme::spec_of(index).unwrap_or_else(theme::default_custom_spec);
+        self.theme_editor = Some(ThemeEditorState {
+            origin: None,
+            name: theme::fresh_theme_name(),
+            dark: true,
+            dark_fields: ThemeColourFields::from_colours(spec.dark),
+            light_fields: ThemeColourFields::from_colours(spec.light),
+            before_theme: theme::theme_index(),
+            before_scheme: theme::scheme_index(),
+            previewing: false,
+        });
+        self.colour_picker = None;
+    }
+
     /// Open the picker for one of the Create theme colour boxes.
     pub fn open_theme_colour_picker(&mut self, dark: bool, field: usize) {
         let Some(editor) = self.theme_editor.as_ref() else { return };
@@ -516,7 +533,7 @@ fn appearance_window(ctx: &egui::Context, app: &mut App) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if primary_button(ui, "Create theme").clicked() {
                         theme::clear_preview(ctx);
-                        app.dlg.open_theme_editor(cur_theme);
+                        app.dlg.open_new_theme_editor(cur_theme);
                     }
                     if ui.button("Import").clicked() {
                         app.dlg.theme_file = Some(ThemeFileState {
@@ -1598,7 +1615,7 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Tag:Rename 1.1.2").strong().size(22.0));
+                    ui.label(RichText::new("Tag:Rename 1.1.3").strong().size(22.0));
                     ui.label(
                         RichText::new("Music tag editor — modern dark edition").color(c_text_dim()),
                     );

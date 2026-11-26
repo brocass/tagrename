@@ -1,4 +1,10 @@
-# Latest pass: version 1.1.2 Linux package
+# Latest pass: version 1.1.3 Linux and Windows packages
+
+-88. "Create theme" now always opens a brand-new theme, even when a custom theme is selected. The selected palette is only a starting point; origin stays None so Save appends a new custom theme instead of overwriting the selected one, and Remove theme stays disabled. New themes get a non-colliding default name such as "My theme 2" (ui_dialogs.rs open_new_theme_editor, theme.rs fresh_theme_name). A screenshot with a custom theme selected confirmed the editor opens as "My theme".
+-89. Version bumped to 1.1.3 everywhere visible. cargo test passes 46/46. Linux package rebuilt and installed: dist/tagrename-1.1.3-linux-x86_64.tar.gz SHA-256 c460025354f1253d8f19b1fd9bfd9dc1d68f31846102a067cfa4c3e8876001d8; installed /home/steven/.local/bin/tagrename SHA-256 52a2520d8ee44e6d795ec8f033744afaba6e7a0c52bda454b5eb23efb2d3a1cb. The binary contains "Tag:Rename 1.1.3".
+-90. Windows 1.1.3 packages were built in the Windows VM from the synced source tree: Z:\Tag-Rename-1.1.3-windows-x64.zip SHA-256 a61d53fea864eb47878d57534c11cd6a73c11a9594365d30b16831f4fb19e7bb and Z:\Tag-Rename-1.1.3-setup.exe SHA-256 d0c7215c9184d85bae3de0d8fe212179bf24bd91bdf9a6b38a00796756c733a3. Inno Setup reported a successful compile and verify-windows.ps1 installed the setup silently: shortcut, target, icon, installed EXE, config directory and running app all verified.
+
+# Earlier pass: version 1.1.2 Linux package
 
 -81. The hex colour boxes in Create theme are editable again; only their swatches open the in-app Colour picker. Editing a hex value, dragging in the picker, using its RGB fields, switching Dark/Light, or generating opposing colours now previews that palette in the whole app immediately (theme.rs preview/clear_preview, ui_dialogs.rs).
 -82. Cancelling Create theme, closing it with its X, exporting while it is open, or cancelling the Colour picker restores the palette that was active before the change. Save/Remove keep the new palette. Preview is never written to themes.json.

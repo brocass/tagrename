@@ -259,12 +259,12 @@ fn main() -> eframe::Result<()> {
                 }
                 // Verification knob: open the Create theme panel directly.
                 if std::env::var("TAGRENAME_CREATE_THEME").is_ok() {
-                    app.dlg.open_theme_editor(theme::theme_index());
+                    app.dlg.open_new_theme_editor(theme::theme_index());
                 }
                 // Verification knob: open Create theme already previewing the
                 // chosen mode. Accepts "dark" or "light" (default dark).
                 if let Ok(mode) = std::env::var("TAGRENAME_EDITOR_MODE") {
-                    app.dlg.open_theme_editor(theme::theme_index());
+                    app.dlg.open_new_theme_editor(theme::theme_index());
                     let dark = mode.trim() != "light";
                     app.dlg.set_theme_editor_mode(dark);
                     app.dlg.preview_theme_editor(&cc.egui_ctx);
@@ -272,7 +272,7 @@ fn main() -> eframe::Result<()> {
                 // Verification knob: open the Create theme panel with the colour
                 // picker over one box. Accepts dark-bg/text/accent or light-*.
                 if let Ok(which) = std::env::var("TAGRENAME_COLOR_PICKER") {
-                    app.dlg.open_theme_editor(theme::theme_index());
+                    app.dlg.open_new_theme_editor(theme::theme_index());
                     let (dark, field) = match which.trim() {
                         "dark-bg" => (true, 0),
                         "dark-text" => (true, 1),

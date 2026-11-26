@@ -643,7 +643,20 @@ pub fn spec_of(index: usize) -> Option<CustomThemeSpec> {
 pub fn default_custom_spec() -> CustomThemeSpec {
     let dark = seeds(palette_of(0, true));
     let light = opposing_colours(false, dark);
-    CustomThemeSpec { name: "My theme".into(), dark, light }
+    CustomThemeSpec { name: fresh_theme_name(), dark, light }
+}
+
+/// A default name that does not collide with any existing theme, so
+/// "Create theme" never looks like it is replacing the selected one.
+pub fn fresh_theme_name() -> String {
+    let guard = list().read().unwrap_or_else(|e| e.into_inner());
+    let mut name = "My theme".to_string();
+    let mut suffix = 2;
+    while guard.iter().any(|t| t.name.eq_ignore_ascii_case(&name)) {
+        name = format!("My theme {suffix}");
+        suffix += 1;
+    }
+    name
 }
 
 pub fn install(ctx: &Context) {
@@ -925,6 +938,8 @@ mod tests {
     fn custom_themes_are_appended_updated_and_removed() {
         let _guard = locked();
         super::load_customs();
+        let fresh = super::fresh_theme_name();
+        assert!(super::themes().iter().all(|t| !t.name.eq_ignore_ascii_case(&fresh)));
         let spec = super::CustomThemeSpec {
             name: "Checked custom".into(),
             dark: super::ThemeColours {
