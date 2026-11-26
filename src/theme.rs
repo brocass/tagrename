@@ -200,19 +200,27 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color32 {
     Color32::from_rgb(byte(r), byte(g), byte(b))
 }
 
-/// Build the opposing mode's three colours from the current one. Hue is
-/// rotated by half a turn for text and accent, while brightness is moved to
-/// the other mode's range so the generated scheme stays in a similar scope.
+/// Build the opposing mode's three colours from the current one. Each colour
+/// keeps its hue and a similar saturation, with brightness moved into the
+/// other mode's range, so the result reads as the same theme at the other
+/// lightness rather than a new set of unrelated colours.
 pub fn opposing_colours(target_dark: bool, colours: ThemeColours) -> ThemeColours {
-    let (bh, bs, _) = rgb_to_hsv(colours.bg);
-    let (th, ts, _) = rgb_to_hsv(colours.text);
-    let (ah, asat, _) = rgb_to_hsv(colours.accent);
-    let sat = |s: f32| if s < 0.18 { 0.18 } else { s };
-    let (bg_v, text_v, accent_v) = if target_dark { (0.16, 0.88, 0.72) } else { (0.92, 0.14, 0.55) };
-    ThemeColours {
-        bg: hsv_to_rgb(bh, sat(bs) * 0.55, bg_v),
-        text: hsv_to_rgb((th + 0.5).rem_euclid(1.0), sat(ts), text_v),
-        accent: hsv_to_rgb((ah + 0.5).rem_euclid(1.0), sat(asat).max(0.35), accent_v),
+    let (bh, bs, bv) = rgb_to_hsv(colours.bg);
+    let (th, ts, tv) = rgb_to_hsv(colours.text);
+    let (ah, asat, av) = rgb_to_hsv(colours.accent);
+    let clamp = |value: f32, low: f32, high: f32| value.clamp(low, high);
+    if target_dark {
+        ThemeColours {
+            bg: hsv_to_rgb(bh, clamp(bs * 0.55, 0.04, 0.30), clamp(1.0 - bv, 0.10, 0.20)),
+            text: hsv_to_rgb(th, clamp(ts * 0.80, 0.06, 0.40), clamp(1.0 - tv, 0.82, 0.95)),
+            accent: hsv_to_rgb(ah, clamp(asat, 0.35, 0.85), clamp(1.0 - av, 0.62, 0.90)),
+        }
+    } else {
+        ThemeColours {
+            bg: hsv_to_rgb(bh, clamp(bs * 0.35, 0.02, 0.18), clamp(1.0 - bv, 0.84, 0.96)),
+            text: hsv_to_rgb(th, clamp(ts * 0.85, 0.10, 0.55), clamp(1.0 - tv, 0.08, 0.20)),
+            accent: hsv_to_rgb(ah, clamp(asat, 0.35, 0.90), clamp(1.0 - av, 0.50, 0.72)),
+        }
     }
 }
 
@@ -312,9 +320,16 @@ pub fn theme_count() -> usize {
     list().read().unwrap_or_else(|e| e.into_inner()).len()
 }
 
-/// A temporary theme used while Create theme is open, so colour edits are
-/// visible before Save. It is never written to the theme list or to disk.
-static PREVIEW: RwLock<Option<Theme>> = RwLock::new(None);
+/// A temporary theme used while Create theme is open, so colour edits and the
+/// Dark/Light choice are visible before Save. It is never written to the
+/// theme list or to disk.
+struct PreviewState {
+    theme: Theme,
+    /// Which mode the Create theme editor is showing, not the saved scheme.
+    dark: bool,
+}
+
+static PREVIEW: RwLock<Option<PreviewState>> = RwLock::new(None);
 
 static THEME: AtomicUsize = AtomicUsize::new(0);
 static SCHEME: AtomicUsize = AtomicUsize::new(SCHEME_DARK);
@@ -346,8 +361,8 @@ pub fn palette_of(theme: usize, dark: bool) -> Palette {
 
 fn active_palette(dark: bool) -> Palette {
     if let Ok(guard) = PREVIEW.read() {
-        if let Some(theme) = guard.as_ref() {
-            return if dark { theme.dark } else { theme.light };
+        if let Some(preview) = guard.as_ref() {
+            return if preview.dark { preview.theme.dark } else { preview.theme.light };
         }
     }
     palette_of(theme_index(), dark)
@@ -359,16 +374,34 @@ pub fn pal() -> Palette {
 
 /// Show an unsaved custom theme immediately, without changing the saved
 /// selection or themes.json. Used while the Create theme panel is open.
-pub fn preview(ctx: &Context, spec: &CustomThemeSpec) {
+pub fn preview(ctx: &Context, spec: &CustomThemeSpec, dark: bool) {
     let theme = Theme {
         name: Cow::Borrowed("Preview"),
         dark: custom_palette(true, spec.dark),
         light: custom_palette(false, spec.light),
     };
     if let Ok(mut guard) = PREVIEW.write() {
-        *guard = Some(theme);
+        *guard = Some(PreviewState { theme, dark });
     }
     install(ctx);
+}
+
+/// Change only the mode shown by an active preview. Used when the editor's
+/// Dark/Light buttons are clicked, even if a hex field is mid-edit.
+pub fn set_preview_mode(ctx: &Context, dark: bool) {
+    let changed = if let Ok(mut guard) = PREVIEW.write() {
+        if let Some(preview) = guard.as_mut() {
+            preview.dark = dark;
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if changed {
+        install(ctx);
+    }
 }
 
 /// Drop the unsaved preview and restore the selected theme.
@@ -785,12 +818,20 @@ mod tests {
             },
         };
         if let Ok(mut guard) = super::PREVIEW.write() {
-            *guard = Some(super::Theme {
-                name: "Preview".into(),
-                dark: super::custom_palette(true, spec.dark),
-                light: super::custom_palette(false, spec.light),
+            *guard = Some(super::PreviewState {
+                theme: super::Theme {
+                    name: "Preview".into(),
+                    dark: super::custom_palette(true, spec.dark),
+                    light: super::custom_palette(false, spec.light),
+                },
+                dark: true,
             });
         }
+        assert_eq!(super::pal().bg, spec.dark.bg);
+        let ctx = egui::Context::default();
+        super::set_preview_mode(&ctx, false);
+        assert_eq!(super::pal().bg, spec.light.bg);
+        super::set_preview_mode(&ctx, true);
         assert_eq!(super::pal().bg, spec.dark.bg);
         if let Ok(mut guard) = super::PREVIEW.write() {
             *guard = None;
@@ -837,6 +878,23 @@ mod tests {
         let back = super::opposing_colours(false, dark);
         assert!(back.bg.r() > dark.bg.r());
         assert!(back.text.r() < dark.text.r());
+    }
+
+    #[test]
+    fn opposing_colours_keep_the_source_hue() {
+        let light = super::ThemeColours {
+            bg: super::hex(0x223344),
+            text: super::hex(0xdceeff),
+            accent: super::hex(0x3366cc),
+        };
+        for dark in [super::opposing_colours(true, light), super::opposing_colours(false, light)] {
+            for (from, to) in [(light.bg, dark.bg), (light.text, dark.text), (light.accent, dark.accent)] {
+                let (h1, _, _) = super::rgb_to_hsv(from);
+                let (h2, _, _) = super::rgb_to_hsv(to);
+                let gap = (h1 - h2).abs().min(1.0 - (h1 - h2).abs());
+                assert!(gap < 0.02, "hue drifted from {h1} to {h2}");
+            }
+        }
     }
 
     #[test]

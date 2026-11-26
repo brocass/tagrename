@@ -173,6 +173,7 @@ impl ThemeEditorState {
             theme::preview(
                 ctx,
                 &CustomThemeSpec { name: self.name.clone(), dark, light },
+                self.dark,
             );
             self.previewing = true;
         }
@@ -422,6 +423,21 @@ impl Dialogs {
             current,
             editor.previewing,
         ));
+    }
+
+    /// Switch which mode the open Create theme panel is editing.
+    pub fn set_theme_editor_mode(&mut self, dark: bool) {
+        if let Some(editor) = self.theme_editor.as_mut() {
+            editor.dark = dark;
+        }
+    }
+
+    /// Push the open editor's colours into the live preview. Used by the
+    /// screenshot-only Dark/Light staging knob.
+    pub fn preview_theme_editor(&mut self, ctx: &egui::Context) {
+        if let Some(editor) = self.theme_editor.as_mut() {
+            editor.apply_preview(ctx);
+        }
     }
 
     fn take_results(&mut self) -> Vec<crate::ui_tageditor::EditorResult> {
@@ -786,12 +802,14 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
                     primary_button(ui, "Dark");
                 } else if ui.button("Dark").clicked() {
                     editor.dark = true;
+                    theme::set_preview_mode(ctx, true);
                     editor.apply_preview(ctx);
                 }
                 if !editor.dark {
                     primary_button(ui, "Light");
                 } else if ui.button("Light").clicked() {
                     editor.dark = false;
+                    theme::set_preview_mode(ctx, false);
                     editor.apply_preview(ctx);
                 }
             });
