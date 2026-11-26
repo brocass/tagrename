@@ -204,6 +204,9 @@ fn main() -> eframe::Result<()> {
             // Without a saved choice the app opens on the Default theme
             // in its modern dark scheme (screenshot runs use the same default).
             theme::install_fonts(&cc.egui_ctx);
+            // Custom themes are appended after the built-ins, so load them
+            // before the saved numeric theme index is restored.
+            theme::load_customs();
             if !screenshot_mode {
                 if let Some((t, s)) = theme::saved_choice() {
                     theme::select(&cc.egui_ctx, t, s);
@@ -253,6 +256,10 @@ fn main() -> eframe::Result<()> {
                 // Verification knob: open the Appearance window for a screenshot.
                 if std::env::var("TAGRENAME_APPEARANCE").is_ok() {
                     app.dlg.show_appearance = true;
+                }
+                // Verification knob: open the Create theme panel directly.
+                if std::env::var("TAGRENAME_CREATE_THEME").is_ok() {
+                    app.dlg.open_theme_editor(theme::theme_index());
                 }
                 // Verification knob: open the Mask Editor (0 = rename mask,
                 // 1 = file-name-to-tag mask) for a screenshot.

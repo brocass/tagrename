@@ -7,6 +7,7 @@ use egui::{RichText, Ui};
 
 use crate::data::{Field, EXPORT_FIELDS, ALL_FIELDS};
 use crate::mask;
+use crate::theme;
 use crate::theme::*;
 use crate::ui::App;
 
@@ -84,6 +85,81 @@ pub enum ChooseDone {
     Bytes(Vec<u8>),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ThemeFilePurpose {
+    Export,
+    Import,
+}
+
+impl ThemeFilePurpose {
+    fn title(self) -> &'static str {
+        match self {
+            ThemeFilePurpose::Export => "Export theme",
+            ThemeFilePurpose::Import => "Import theme",
+        }
+    }
+
+    fn action(self) -> &'static str {
+        match self {
+            ThemeFilePurpose::Export => "Save",
+            ThemeFilePurpose::Import => "Load",
+        }
+    }
+}
+
+struct ThemeFileState {
+    purpose: ThemeFilePurpose,
+    path: String,
+}
+
+/// The three colour strings are kept as the person types them; they are only
+/// parsed into colours when saving, exporting or generating.
+#[derive(Clone)]
+struct ThemeColourFields {
+    bg: String,
+    text: String,
+    accent: String,
+}
+
+impl ThemeColourFields {
+    fn from_colours(c: ThemeColours) -> Self {
+        Self { bg: hex_string(c.bg), text: hex_string(c.text), accent: hex_string(c.accent) }
+    }
+
+    fn parse(&self, mode: &str) -> Result<ThemeColours, String> {
+        let bad = |field: &str| format!("{mode} {field} must be a #RRGGBB colour");
+        Ok(ThemeColours {
+            bg: parse_hex(&self.bg).ok_or_else(|| bad("background"))?,
+            text: parse_hex(&self.text).ok_or_else(|| bad("text"))?,
+            accent: parse_hex(&self.accent).ok_or_else(|| bad("accent"))?,
+        })
+    }
+}
+
+struct ThemeEditorState {
+    /// Some(index) when an existing custom theme is being edited.
+    origin: Option<usize>,
+    name: String,
+    /// Which mode's colours are visible, not the app's global colour scheme.
+    dark: bool,
+    dark_fields: ThemeColourFields,
+    light_fields: ThemeColourFields,
+}
+
+impl ThemeEditorState {
+    fn spec(&self) -> Result<CustomThemeSpec, String> {
+        let name = self.name.trim().to_string();
+        if name.is_empty() {
+            return Err("Give the theme a name first".to_string());
+        }
+        Ok(CustomThemeSpec {
+            name,
+            dark: self.dark_fields.parse("Dark")?,
+            light: self.light_fields.parse("Light")?,
+        })
+    }
+}
+
 pub struct Dialogs {
     pub tag_editor: Option<crate::ui_tageditor::TagEditor>,
     /// The Tag Editor's size when it is not full screen; kept while the
@@ -109,6 +185,8 @@ pub struct Dialogs {
     pub autofill_use_total: bool,
     pub show_find: bool,
     pub show_appearance: bool,
+    pub theme_editor: Option<ThemeEditorState>,
+    pub theme_file: Option<ThemeFileState>,
     pub find_text: String,
     pub find_match_case: bool,
     pub show_about: bool,
@@ -152,6 +230,8 @@ impl Default for Dialogs {
             autofill_use_total: false,
             show_find: false,
             show_appearance: false,
+            theme_editor: None,
+            theme_file: None,
             find_text: String::new(),
             find_match_case: false,
             show_about: false,
@@ -181,6 +261,21 @@ impl Dialogs {
         self.show_mask_editor = Some(which);
         self.mask_backup = current.to_string();
         self.saved_mask_sel = None;
+    }
+
+    /// Open the Create theme panel. A custom theme is opened for editing;
+    /// a built-in one is only used as a starting point for a new theme.
+    pub fn open_theme_editor(&mut self, index: usize) {
+        let spec = theme::spec_of(index).unwrap_or_else(theme::default_custom_spec);
+        let origin = if index >= theme::BUILTIN_COUNT { Some(index) } else { None };
+        let name = if origin.is_some() { spec.name } else { "My theme".to_string() };
+        self.theme_editor = Some(ThemeEditorState {
+            origin,
+            name,
+            dark: true,
+            dark_fields: ThemeColourFields::from_colours(spec.dark),
+            light_fields: ThemeColourFields::from_colours(spec.light),
+        });
     }
 
     fn take_results(&mut self) -> Vec<crate::ui_tageditor::EditorResult> {
@@ -254,7 +349,20 @@ fn appearance_window(ctx: &egui::Context, app: &mut App) {
                 }
             });
             ui.add_space(16.0);
-            ui.label(appearance_heading("Theme"));
+            ui.horizontal(|ui| {
+                ui.label(appearance_heading("Theme"));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if primary_button(ui, "Create theme").clicked() {
+                        app.dlg.open_theme_editor(cur_theme);
+                    }
+                    if ui.button("Import").clicked() {
+                        app.dlg.theme_file = Some(ThemeFileState {
+                            purpose: ThemeFilePurpose::Import,
+                            path: theme_json_path("theme"),
+                        });
+                    }
+                });
+            });
             ui.add_space(6.0);
             let w = (ui.available_width() - 2.0 * gap) / 3.0;
             for (row, chunk) in themes().chunks(3).enumerate() {
@@ -262,7 +370,7 @@ fn appearance_window(ctx: &egui::Context, app: &mut App) {
                     ui.spacing_mut().item_spacing.x = gap;
                     for (col, t) in chunk.iter().enumerate() {
                         let k = row * 3 + col;
-                        if theme_card(ui, w, t.name, k, cur_theme == k).clicked() {
+                        if theme_card(ui, w, &t.name, k, cur_theme == k, k >= theme::BUILTIN_COUNT).clicked() {
                             pick_theme = k;
                         }
                     }
@@ -361,7 +469,7 @@ fn scheme_card(ui: &mut Ui, w: f32, scheme: usize, theme: usize, selected: bool)
     resp
 }
 
-fn theme_card(ui: &mut Ui, w: f32, name: &str, k: usize, selected: bool) -> egui::Response {
+fn theme_card(ui: &mut Ui, w: f32, name: &str, k: usize, selected: bool, custom: bool) -> egui::Response {
     let (resp, rect) = appearance_card(ui, egui::vec2(w, 60.0), selected);
     let p = pal();
     let sw = palette_of(k, is_dark());
@@ -385,7 +493,7 @@ fn theme_card(ui: &mut Ui, w: f32, name: &str, k: usize, selected: bool) -> egui
     ui.painter().text(
         rect.min + egui::vec2(58.0, 40.0),
         egui::Align2::LEFT_CENTER,
-        "Built in",
+        if custom { "Custom" } else { "Built in" },
         egui::FontId::proportional(12.0),
         p.text_dim,
     );
@@ -399,6 +507,289 @@ fn theme_card(ui: &mut Ui, w: f32, name: &str, k: usize, selected: bool) -> egui
         );
     }
     resp
+}
+
+/// Default location for an exported/imported theme file, in the app's
+/// config folder so it is easy to find on both Linux and Windows.
+fn theme_json_path(name: &str) -> String {
+    let stem: String = name
+        .trim()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    let stem = if stem.is_empty() || stem.eq_ignore_ascii_case("themes") { "theme".to_string() } else { stem };
+    crate::ui::config_file(&format!("{stem}.json"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| format!("{stem}.json"))
+}
+
+fn with_json_extension(path: PathBuf) -> PathBuf {
+    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        path
+    } else {
+        path.with_extension("json")
+    }
+}
+
+fn colour_row(ui: &mut Ui, field: &mut String) {
+    ui.horizontal(|ui| {
+        let colour = parse_hex(field).unwrap_or(egui::Color32::GRAY);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(28.0, 20.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, egui::CornerRadius::same(5), colour);
+        ui.painter().rect_stroke(
+            rect,
+            egui::CornerRadius::same(5),
+            egui::Stroke::new(1.0, c_separator()),
+            egui::StrokeKind::Middle,
+        );
+        ui.add(egui::TextEdit::singleline(field).desired_width(130.0).hint_text("#RRGGBB"));
+    });
+}
+
+fn import_theme_json(ctx: &egui::Context, value: &serde_json::Value) -> Result<(usize, usize), String> {
+    let specs = if value.is_array() || value.get("themes").is_some() {
+        theme::custom_themes_from_json(value)?
+    } else {
+        vec![theme::theme_from_json(value)?]
+    };
+    let count = specs.len();
+    if count == 0 {
+        return Err("That file contains no themes".to_string());
+    }
+    let mut last = 0;
+    for spec in specs {
+        last = theme::add_or_update_custom(spec, None)?;
+    }
+    theme::select(ctx, last, scheme_index());
+    theme::save_choice(last, scheme_index());
+    Ok((last, count))
+}
+
+/// The Create theme panel: name, Dark/Light choice, three editable colours,
+/// a generate-opposing-colours action, and the bottom action row.
+fn create_theme_window(ctx: &egui::Context, app: &mut App) {
+    let Some(mut editor) = app.dlg.theme_editor.take() else { return };
+    enum Action { None, Save, Remove, Cancel, Export }
+    let mut action = Action::None;
+    let mut open = true;
+    egui::Window::new("Create theme")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .default_width(440.0)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_sized(egui::vec2(70.0, 20.0), egui::Label::new("Name"));
+                ui.add(egui::TextEdit::singleline(&mut editor.name).desired_width(320.0).hint_text("Theme name"));
+            });
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if editor.dark {
+                    primary_button(ui, "Dark");
+                } else if ui.button("Dark").clicked() {
+                    editor.dark = true;
+                }
+                if !editor.dark {
+                    primary_button(ui, "Light");
+                } else if ui.button("Light").clicked() {
+                    editor.dark = false;
+                }
+            });
+            ui.add_space(8.0);
+            egui::Grid::new("create_theme_colours").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                let (label, field) = if editor.dark {
+                    ("Background", &mut editor.dark_fields.bg)
+                } else {
+                    ("Background", &mut editor.light_fields.bg)
+                };
+                ui.label(label);
+                colour_row(ui, field);
+                ui.end_row();
+
+                let (label, field) = if editor.dark {
+                    ("Text", &mut editor.dark_fields.text)
+                } else {
+                    ("Text", &mut editor.light_fields.text)
+                };
+                ui.label(label);
+                colour_row(ui, field);
+                ui.end_row();
+
+                let (label, field) = if editor.dark {
+                    ("Accent", &mut editor.dark_fields.accent)
+                } else {
+                    ("Accent", &mut editor.light_fields.accent)
+                };
+                ui.label(label);
+                colour_row(ui, field);
+                ui.end_row();
+            });
+            ui.add_space(10.0);
+            let generate_label = if editor.dark {
+                "Generate dark colours from light"
+            } else {
+                "Generate Light colours from Dark"
+            };
+            if primary_button(ui, generate_label).clicked() {
+                let source = if editor.dark { &editor.light_fields } else { &editor.dark_fields };
+                match source.parse(if editor.dark { "Light" } else { "Dark" }) {
+                    Ok(colours) => {
+                        let generated = theme::opposing_colours(editor.dark, colours);
+                        if editor.dark {
+                            editor.dark_fields = ThemeColourFields::from_colours(generated);
+                        } else {
+                            editor.light_fields = ThemeColourFields::from_colours(generated);
+                        }
+                    }
+                    Err(err) => app.warn(err),
+                }
+            }
+            ui.add_space(14.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.add_enabled(editor.origin.is_some(), egui::Button::new("Remove theme")).clicked() {
+                    action = Action::Remove;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if primary_button(ui, "Save theme").clicked() {
+                        action = Action::Save;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        action = Action::Cancel;
+                    }
+                    if ui.button("Export").clicked() {
+                        action = Action::Export;
+                    }
+                });
+            });
+        });
+
+    let mut close = !open;
+    match action {
+        Action::None => {}
+        Action::Cancel => close = true,
+        Action::Export => {
+            app.dlg.theme_file = Some(ThemeFileState {
+                purpose: ThemeFilePurpose::Export,
+                path: theme_json_path(&editor.name),
+            });
+            close = false;
+        }
+        Action::Save => match editor.spec() {
+            Ok(spec) => match theme::add_or_update_custom(spec.clone(), editor.origin) {
+                Ok(index) => {
+                    theme::select(ctx, index, scheme_index());
+                    theme::save_choice(index, scheme_index());
+                    app.say(format!("Theme \"{}\" saved", spec.name));
+                    close = true;
+                }
+                Err(err) => app.warn(err),
+            },
+            Err(err) => app.warn(err),
+        },
+        Action::Remove => {
+            if let Some(origin) = editor.origin {
+                let current = theme::theme_index();
+                let index = theme::remove_custom(origin, current);
+                theme::select(ctx, index, scheme_index());
+                theme::save_choice(index, scheme_index());
+                app.say("Theme removed");
+                close = true;
+            } else {
+                app.warn("Only custom themes can be removed");
+            }
+        }
+    }
+    if !close {
+        app.dlg.theme_editor = Some(editor);
+    }
+}
+
+/// Small in-app path panel used by Export and Import.
+fn theme_file_window(ctx: &egui::Context, app: &mut App) {
+    let Some(mut state) = app.dlg.theme_file.take() else { return };
+    let purpose = state.purpose;
+    enum Action { None, Done, Cancel }
+    let mut action = Action::None;
+    let mut open = true;
+    egui::Window::new(purpose.title())
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .default_width(470.0)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.label("File path");
+            ui.add(egui::TextEdit::singleline(&mut state.path).desired_width(420.0).hint_text("~/.config/tagrename/theme.json"));
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if primary_button(ui, purpose.action()).clicked() {
+                        action = Action::Done;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        action = Action::Cancel;
+                    }
+                });
+            });
+        });
+
+    let mut close = !open;
+    match action {
+        Action::None => {}
+        Action::Cancel => close = true,
+        Action::Done => {
+            let path = with_json_extension(expand_tilde(&state.path));
+            match purpose {
+                ThemeFilePurpose::Export => {
+                    let result = app
+                        .dlg
+                        .theme_editor
+                        .as_ref()
+                        .map(|editor| editor.spec())
+                        .unwrap_or_else(|| {
+                            theme::spec_of(theme::theme_index())
+                                .ok_or_else(|| "No theme to export".to_string())
+                        });
+                    match result {
+                        Ok(spec) => match serde_json::to_string_pretty(&theme::theme_to_json(&spec)) {
+                            Ok(json) => {
+                                if let Some(dir) = path.parent() {
+                                    let _ = std::fs::create_dir_all(dir);
+                                }
+                                match std::fs::write(&path, json) {
+                                    Ok(()) => {
+                                        app.say(format!("Theme exported to {}", path.display()));
+                                        close = true;
+                                    }
+                                    Err(err) => app.warn(format!("Could not write theme: {err}")),
+                                }
+                            }
+                            Err(err) => app.warn(format!("Could not build JSON: {err}")),
+                        },
+                        Err(err) => app.warn(err),
+                    }
+                }
+                ThemeFilePurpose::Import => match std::fs::read_to_string(&path) {
+                    Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(value) => match import_theme_json(ctx, &value) {
+                            Ok((_, count)) => {
+                                app.say(format!("Imported {count} theme{}", if count == 1 { "" } else { "s" }));
+                                close = true;
+                            }
+                            Err(err) => app.warn(err),
+                        },
+                        Err(err) => app.warn(format!("Not a valid theme JSON file: {err}")),
+                    },
+                    Err(err) => app.warn(format!("Could not read theme file: {err}")),
+                },
+            }
+        }
+    }
+    if !close {
+        app.dlg.theme_file = Some(state);
+    }
 }
 
 pub fn draw(ctx: &egui::Context, app: &mut App) {
@@ -666,6 +1057,12 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
     if app.dlg.show_appearance {
         appearance_window(ctx, app);
     }
+    if app.dlg.theme_editor.is_some() {
+        create_theme_window(ctx, app);
+    }
+    if app.dlg.theme_file.is_some() {
+        theme_file_window(ctx, app);
+    }
 
     // --- Options ---
     if app.dlg.show_options {
@@ -753,7 +1150,7 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Tag:Rename 1.0.1").strong().size(22.0));
+                    ui.label(RichText::new("Tag:Rename 1.1.0").strong().size(22.0));
                     ui.label(
                         RichText::new("Music tag editor — modern dark edition").color(c_text_dim()),
                     );

@@ -1,4 +1,17 @@
-# Latest pass: Slab theme
+# Latest pass: version 1.1.0 Linux package
+
+-73. Version bumped to 1.1.0 for the custom-theme feature and Slab light-text change. Updated Cargo.toml/Cargo.lock, the title bar and About dialog, both package READMEs, PKGBUILD, package-windows.bat, tagrename-installer.iss and the Windows host rebuild/verify scripts. cargo test passes 42/42.
+-74. Linux package rebuilt and installed at the person's request: dist/tagrename-1.1.0-linux-x86_64.tar.gz SHA-256 0fd3aa856be4b981696e9a35acd7ca1cdb135068f340a8cd924c26627743cfff; installed /home/steven/.local/bin/tagrename SHA-256 4c35862abe49dce6d8138c9a41fc2aefbb29dd8be8d198a4e2433c698fe161a4. The binary contains "Tag:Rename 1.1.0", and a screenshot run opened the Appearance window showing the Import and Create theme buttons.
+-75. Windows packages were intentionally left at 1.0.1. The Windows build source tree and its host scripts were synced to 1.1.0 so a later VM rebuild can produce matching packages.
+
+# Earlier pass: custom themes and Slab light text
+
+-69. Slab's light text is now #2F2F2F (was #504945); the dark palette is unchanged. Updated the Slab colour test (theme.rs).
+-70. The Appearance window now has right-aligned Import and Create theme buttons beside the Theme heading. Clicking Create theme with a custom theme selected edits it; with a built-in selected it starts a new theme from those colours. A custom theme card says "Custom" instead of "Built in" (ui_dialogs.rs).
+-71. The Create theme panel has a Name field, Dark/Light buttons showing which mode is being edited, Background/Text/Accent rows with a colour swatch beside each #RRGGBB box, a "Generate dark colours from light" / "Generate Light colours from Dark" button that builds a complementary opposing palette, and a bottom row with Remove theme on the left and Export / Cancel / Save theme on the right (ui_dialogs.rs, theme.rs).
+-72. Custom themes are appended after the eleven built-ins, so saved numeric theme indices keep their meaning. They persist in ~/.config/tagrename/themes.json (or %APPDATA%/Tag-Rename/themes.json on Windows). Export/Import use small in-app path panels defaulting to that config folder; exported files contain one theme as JSON, and Import also accepts a themes.json-style array. cargo test passes 42/42.
+
+# Earlier pass: Slab theme
 
 -57. Added Slab to View > Appearance, between GitHub and High Contrast, as the ninth theme (index 8, so existing saved choices keep their meaning). Light: background #8b8b8b, contrasting surface #818181, text #504945, accent #f37135. Dark: background #403d3d, contrasting surface #4f4c4c, text #d5c4a1, accent #f37135. The remaining dim text and accent/shadow colours are sampled from the supplied screenshots (theme.rs).
 -58. Checked with local screenshots shots/slab-dark.png and shots/slab-light.png; their dominant colours match the requested backgrounds and contrasting surfaces. cargo test passes 35/35. Packages were rebuilt afterwards; see the packaging pass below.
