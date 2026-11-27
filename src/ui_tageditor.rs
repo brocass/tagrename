@@ -554,16 +554,24 @@ pub fn show(ctx: &egui::Context, app: &mut App, ed: &mut TagEditor) -> bool {
 fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: egui::Rect) {
     let bottom = below.bottom();
     ui.horizontal(|ui| {
-        ui.label("File:");
-        let mut name = ed.file_name(app);
-        ui.add(
-            egui::TextEdit::singleline(&mut name)
-                .interactive(false)
-                // Bounded: on the editor window's first frame
-                // available_width can be huge, which used to blow the
-                // window up past the screen.
-                .desired_width(ui.available_width()),
-        );
+        ui.label(if ed.multi { "Files:" } else { "File:" });
+        if ed.multi {
+            let mut name = format!("{} files selected", ed.indices.len());
+            ui.add_enabled(
+                false,
+                egui::TextEdit::singleline(&mut name).desired_width(ui.available_width()),
+            );
+        } else {
+            let mut name = ed.file_name(app);
+            ui.add(
+                egui::TextEdit::singleline(&mut name)
+                    .interactive(false)
+                    // Bounded: on the editor window's first frame
+                    // available_width can be huge, which used to blow the
+                    // window up past the screen.
+                    .desired_width(ui.available_width()),
+            );
+        }
     });
     // File details live in the caption now, so the compact dialog can
     // show every field without a separate read-only row.
@@ -1111,14 +1119,18 @@ fn art_panel(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, art_w: f32) {
                 (None, _) => "No album art".to_string(),
             };
             ui.label(RichText::new(info).color(c_text_dim()).size(13.0));
-            // The button row wraps, so it can never widen the panel.
-            ui.horizontal_wrapped(|ui| {
+            let btn_w = inner.max(120.0);
+            ui.vertical(|ui| {
                 if ui
-                    .small_button("Add / Replace...")
+                    .add_sized(
+                        [btn_w, 24.0],
+                        egui::Button::new("Add / Replace..."),
+                    )
                     .on_hover_text("Choose a picture file (or drag and drop one onto the window)")
                     .clicked()
                 {
                     app.dlg.pick_cover = true;
+                    app.dlg.cover_pick_target = crate::ui_dialogs::CoverPickTarget::TagEditor;
                     app.dlg.choose = Some(crate::ui_dialogs::ChooseState {
                         purpose: crate::ui_dialogs::ChoosePurpose::PickCover,
                         dir: crate::ui_dialogs::default_start_dir(app),
@@ -1128,9 +1140,12 @@ fn art_panel(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, art_w: f32) {
                         path_edit: String::new(),
                     });
                 }
-                if ui.small_button("Save to File...").clicked() {
+                if ui
+                    .add_sized([btn_w, 24.0], egui::Button::new("Save to File..."))
+                    .clicked()
+                {
                     if let Some((mime, bytes)) = &ed.cover_staged {
-                        let suggested = if mime == "PNG" { "cover.png" } else { "cover.jpg" };
+                        let suggested = if mime == "PNG" { "folder.png" } else { "folder.jpg" };
                         app.dlg.save_cover_bytes = Some(bytes.to_vec());
                         app.dlg.choose = Some(crate::ui_dialogs::ChooseState {
                             purpose: crate::ui_dialogs::ChoosePurpose::SaveCover,
@@ -1144,7 +1159,10 @@ fn art_panel(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, art_w: f32) {
                         app.warn("There is no album art to save yet.");
                     }
                 }
-                if ui.small_button("Remove").clicked() {
+                if ui
+                    .add_sized([btn_w, 24.0], egui::Button::new("Remove"))
+                    .clicked()
+                {
                     ed.cover_staged = None;
                     ed.cover_removed = true;
                 }

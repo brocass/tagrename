@@ -54,6 +54,15 @@ pub enum ChoosePurpose {
     SaveLyrics,
 }
 
+/// Where a picked cover image should be applied.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CoverPickTarget {
+    #[default]
+    TagEditor,
+    FileCover,
+    FolderCover,
+}
+
 impl ChoosePurpose {
     fn title(&self) -> &'static str {
         match self {
@@ -357,6 +366,9 @@ pub struct Dialogs {
     /// Lyrics waiting to be written by the Save-to-text-file chooser.
     pub save_lyrics_text: Option<String>,
     pub pick_cover: bool,
+    /// Where a picked cover image should go: the tag editor, the focused
+    /// file's embedded art, or the folder cover file.
+    pub cover_pick_target: CoverPickTarget,
     results: Vec<crate::ui_tageditor::EditorResult>,
 }
 
@@ -403,6 +415,7 @@ impl Default for Dialogs {
             save_cover_bytes: None,
             save_lyrics_text: None,
             pick_cover: false,
+            cover_pick_target: CoverPickTarget::default(),
             results: Vec::new(),
         }
     }
@@ -1879,6 +1892,7 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
                 handle_choose(app, purpose, d);
                 app.dlg.choose = None;
                 app.dlg.pick_cover = false;
+                app.dlg.cover_pick_target = CoverPickTarget::TagEditor;
             }
             None => {
                 if state.cancelled {
@@ -1931,7 +1945,57 @@ fn handle_choose(app: &mut App, purpose: ChoosePurpose, done: ChooseDone) {
             }
         }
         (ChoosePurpose::PickCover, ChooseDone::Bytes(b)) => {
-            crate::ui_tageditor::stage_cover(app, b);
+            match app.dlg.cover_pick_target {
+                CoverPickTarget::TagEditor => {
+                    crate::ui_tageditor::stage_cover(app, b);
+                }
+                CoverPickTarget::FileCover => {
+                    if let Some(i) = app.focused {
+                        if i < app.files.len() && !app.files[i].is_dir {
+                            let path = app.files[i].path.clone();
+                            match crate::data::set_cover(&path, b) {
+                                Ok(()) => {
+                                    if let Some(re) = crate::data::read_file(&path) {
+                                        app.files[i] = re;
+                                    }
+                                    app.say("Cover art updated.");
+                                }
+                                Err(e) => app.warn(e),
+                            }
+                        }
+                    }
+                }
+                CoverPickTarget::FolderCover => {
+                    let Some(folder) = crate::ui_tabs::folder_cover_dir(app) else { return };
+                    let ext = match image::guess_format(&b) {
+                        Ok(image::ImageFormat::Png) => "png",
+                        _ => "jpg",
+                    };
+                    let target = folder.join(format!("folder.{ext}"));
+                    // Replace any existing folder/cover image files.
+                    if let Ok(rd) = std::fs::read_dir(&folder) {
+                        for e in rd.flatten() {
+                            let name = e.file_name().to_string_lossy().to_lowercase();
+                            if matches!(
+                                name.as_str(),
+                                "folder.jpg"
+                                    | "folder.jpeg"
+                                    | "folder.png"
+                                    | "cover.jpg"
+                                    | "cover.jpeg"
+                                    | "cover.png"
+                            ) {
+                                let _ = std::fs::remove_file(e.path());
+                            }
+                        }
+                    }
+                    match std::fs::write(&target, &b) {
+                        Ok(()) => app.say(format!("Saved {}", target.file_name().unwrap_or_default().to_string_lossy())),
+                        Err(e) => app.warn(format!("Can't save cover art: {e}")),
+                    }
+                }
+            }
+            app.dlg.cover_pick_target = CoverPickTarget::TagEditor;
         }
         (ChoosePurpose::LoadLyrics, ChooseDone::Bytes(b)) => {
             let text = String::from_utf8_lossy(&b).into_owned();
@@ -2088,6 +2152,7 @@ fn poll_native_picker(ctx: &egui::Context, app: &mut App) {
         None => app.dlg.choose = None,
     }
     app.dlg.pick_cover = false;
+    app.dlg.cover_pick_target = CoverPickTarget::TagEditor;
 }
 
 fn chooser_body(ui: &mut Ui, app: &mut App, state: &mut ChooseState, done: &mut Option<ChooseDone>) {

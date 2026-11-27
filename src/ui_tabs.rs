@@ -317,7 +317,7 @@ pub fn cover_panels(ui: &mut Ui, app: &mut App) {
                     ui.set_max_width(inner);
                     // One fixed height for both boxes, whether or not they
                     // hold a picture, so their titles sit on the same line.
-                    let body = ui.allocate_exact_size(egui::vec2(inner, img_side + 100.0), egui::Sense::hover()).0;
+                    let body = ui.allocate_exact_size(egui::vec2(inner, img_side + 140.0), egui::Sense::hover()).0;
                     ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
                     ui.set_min_width(inner);
                     ui.add(
@@ -351,7 +351,7 @@ pub fn cover_panels(ui: &mut Ui, app: &mut App) {
                                 };
                                 (key, bytes, kind)
                             }
-                            None => (String::new(), None, "No folder cover art".into()),
+                            None => (String::new(), None, String::new()),
                         }
                     } else {
                         match app.focused.and_then(|i| app.files[i].cover.clone()) {
@@ -359,7 +359,7 @@ pub fn cover_panels(ui: &mut Ui, app: &mut App) {
                                 let key = format!("file_cover:{:p}", std::sync::Arc::as_ptr(&b));
                                 (key, Some(b), mime)
                             }
-                            None => (String::new(), None, "Drag and drop\ncover art here".into()),
+                            None => (String::new(), None, String::new()),
                         }
                     };
                     let tex = match &bytes {
@@ -394,39 +394,118 @@ pub fn cover_panels(ui: &mut Ui, app: &mut App) {
                         );
                     }
                     ui.allocate_rect(img_rect, egui::Sense::hover());
-                    // The caption + button row wraps, so a long button
-                    // can never widen the panel past its column.
-                    // The caption and buttons only appear once a picture is
-                    // there; an empty box shows no Delete / Set / Remove text.
-                    if bytes.is_some() {
                     if !info.is_empty() {
                         ui.label(RichText::new(&info).color(c_text_dim()).size(13.0));
                     }
-                    ui.horizontal_wrapped(|ui| {
-                        if which == 0 {
-                            if ui.small_button(RichText::new("Delete").size(COVER_BUTTON_PT)).clicked() {
-                                if let Some(folder) = folder_cover_dir(app) {
-                                    for _ in 0..4 {
-                                        let Some(p) = find_folder_cover(&folder) else { break };
-                                        let _ = std::fs::remove_file(p);
-                                    }
-                                    app.say("Deleted folder cover art.");
-                                }
+                    let btn_w = inner.max(120.0);
+                    ui.vertical(|ui| {
+                        if ui
+                            .add_sized([btn_w, 24.0], egui::Button::new(RichText::new("Add / Replace...").size(COVER_BUTTON_PT)))
+                            .clicked()
+                        {
+                            if which == 0 {
+                                app.dlg.cover_pick_target = crate::ui_dialogs::CoverPickTarget::FolderCover;
+                            } else {
+                                app.dlg.cover_pick_target = crate::ui_dialogs::CoverPickTarget::FileCover;
                             }
-                            if ui.small_button(RichText::new("Set from file art").size(COVER_BUTTON_PT)).clicked() {
+                            app.dlg.pick_cover = true;
+                            app.dlg.choose = Some(crate::ui_dialogs::ChooseState {
+                                purpose: crate::ui_dialogs::ChoosePurpose::PickCover,
+                                dir: crate::ui_dialogs::default_start_dir(app),
+                                selected: None,
+                                name: String::new(),
+                                cancelled: false,
+                                path_edit: String::new(),
+                            });
+                        }
+                        if which == 0 {
+                            if ui
+                                .add_sized([btn_w, 24.0], egui::Button::new(RichText::new("Copy from File Art").size(COVER_BUTTON_PT)))
+                                .clicked()
+                            {
                                 if let Some(i) = app.focused {
-                                    if let Some((_, bytes)) = app.files[i].cover.clone() {
+                                    if let Some((mime, bytes)) = app.files.get(i).and_then(|f| f.cover.clone()) {
                                         if let Some(folder) = folder_cover_dir(app) {
-                                            match std::fs::write(folder.join("folder.jpg"), bytes.as_slice()) {
-                                                Ok(()) => app.say("Saved folder.jpg"),
-                                                Err(e) => app.warn(format!("Can't save folder.jpg: {e}")),
+                                            let ext = if mime.eq_ignore_ascii_case("PNG")
+                                                || matches!(image::guess_format(bytes.as_ref()), Ok(image::ImageFormat::Png))
+                                            {
+                                                "png"
+                                            } else {
+                                                "jpg"
+                                            };
+                                            // Replace any existing folder/cover image files.
+                                            if let Ok(rd) = std::fs::read_dir(&folder) {
+                                                for e in rd.flatten() {
+                                                    let name = e.file_name().to_string_lossy().to_lowercase();
+                                                    if matches!(
+                                                        name.as_str(),
+                                                        "folder.jpg" | "folder.jpeg" | "folder.png"
+                                                            | "cover.jpg" | "cover.jpeg" | "cover.png"
+                                                    ) {
+                                                        let _ = std::fs::remove_file(e.path());
+                                                    }
+                                                }
+                                            }
+                                            let target = folder.join(format!("folder.{ext}"));
+                                            match std::fs::write(&target, bytes.as_slice()) {
+                                                Ok(()) => app.say(format!("Saved {}", target.file_name().unwrap_or_default().to_string_lossy())),
+                                                Err(e) => app.warn(format!("Can't save folder cover art: {e}")),
                                             }
                                         }
+                                    } else {
+                                        app.warn("The selected file has no cover art.");
                                     }
+                                } else {
+                                    app.warn("No file selected.");
                                 }
                             }
-                        } else if let Some(i) = app.focused {
-                            if ui.small_button(RichText::new("Remove").size(COVER_BUTTON_PT)).clicked() {
+                        } else if ui
+                            .add_sized([btn_w, 24.0], egui::Button::new(RichText::new("Save to File...").size(COVER_BUTTON_PT)))
+                            .clicked()
+                        {
+                            let bytes: Option<Vec<u8>> = app
+                                .focused
+                                .and_then(|i| app.files.get(i))
+                                .and_then(|f| f.cover.as_ref())
+                                .map(|(_, b)| b.as_ref().clone());
+                            if let Some(bytes) = bytes {
+                                let ext = match image::guess_format(&bytes) {
+                                    Ok(image::ImageFormat::Png) => "png",
+                                    _ => "jpg",
+                                };
+                                app.dlg.save_cover_bytes = Some(bytes);
+                                app.dlg.choose = Some(crate::ui_dialogs::ChooseState {
+                                    purpose: crate::ui_dialogs::ChoosePurpose::SaveCover,
+                                    dir: crate::ui_dialogs::default_start_dir(app),
+                                    selected: None,
+                                    name: format!("folder.{ext}"),
+                                    cancelled: false,
+                                    path_edit: String::new(),
+                                });
+                            } else {
+                                app.warn("There is no album art to save yet.");
+                            }
+                        }
+                        if ui
+                            .add_sized([btn_w, 24.0], egui::Button::new(RichText::new("Remove").size(COVER_BUTTON_PT)))
+                            .clicked()
+                        {
+                            if which == 0 {
+                                if let Some(folder) = folder_cover_dir(app) {
+                                    let mut removed = false;
+                                    for _ in 0..8 {
+                                        let Some(p) = find_folder_cover(&folder) else { break };
+                                        if std::fs::remove_file(&p).is_ok() {
+                                            removed = true;
+                                        }
+                                    }
+                                    if removed {
+                                        app.say("Removed folder cover art.");
+                                    } else {
+                                        app.warn("There is no folder cover art to remove.");
+                                    }
+                                }
+                            } else if let Some(i) = app.focused {
                                 let path = app.files[i].path.clone();
                                 match data_remove_cover(&path) {
                                     Ok(()) => {
@@ -436,22 +515,8 @@ pub fn cover_panels(ui: &mut Ui, app: &mut App) {
                                     Err(e) => app.warn(e),
                                 }
                             }
-                            if ui.small_button(RichText::new("Save to File").size(COVER_BUTTON_PT)).clicked() {
-                                if let Some((_, bytes)) = app.files[i].cover.clone() {
-                                    app.dlg.save_cover_bytes = Some(bytes.to_vec());
-                                    app.dlg.choose = Some(crate::ui_dialogs::ChooseState {
-                                        purpose: crate::ui_dialogs::ChoosePurpose::SaveCover,
-                                        dir: crate::ui_dialogs::default_start_dir(app),
-                                        selected: None,
-                                        name: "cover.jpg".into(),
-                                        cancelled: false,
-                                        path_edit: String::new(),
-                                    });
-                                }
-                            }
                         }
                     });
-                    }
                     });
                 });
             });
@@ -462,7 +527,7 @@ pub fn cover_panels(ui: &mut Ui, app: &mut App) {
 /// The folder whose cover the Folder cover art box shows: the focused
 /// row when it is a folder (an album row in the list), otherwise the
 /// folder currently open.
-fn folder_cover_dir(app: &App) -> Option<std::path::PathBuf> {
+pub fn folder_cover_dir(app: &App) -> Option<std::path::PathBuf> {
     if let Some(i) = app.focused {
         if let Some(f) = app.files.get(i) {
             if f.is_dir {
@@ -480,9 +545,12 @@ fn find_folder_cover(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let mut found: Vec<(usize, std::path::PathBuf)> = Vec::new();
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().to_lowercase();
+        // Prefer "folder.*" but accept "cover.*" when no folder art exists.
         let rank = match name.as_str() {
             "folder.jpg" | "folder.jpeg" => 0,
             "folder.png" => 1,
+            "cover.jpg" | "cover.jpeg" => 2,
+            "cover.png" => 3,
             _ => continue,
         };
         if e.path().is_file() {

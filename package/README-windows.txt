@@ -1,4 +1,4 @@
-Tag:Rename 1.1.6 - modern dark edition (Windows, 64-bit)
+Tag:Rename 1.1.7 - modern dark edition (Windows, 64-bit)
 ========================================================
 
 What is in this folder
@@ -11,7 +11,7 @@ Start
 
 Notes
   - This ZIP is portable: running Tag-Rename.exe does not create a Start
-    menu entry. Use Tag-Rename-1.1.6-setup.exe from the release if you want
+    menu entry. Use Tag-Rename-1.1.7-setup.exe from the release if you want
     a Start menu / desktop shortcut.
   - No administrator rights are needed. Keep the program in any folder you
     like.
