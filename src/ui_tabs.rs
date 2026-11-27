@@ -186,95 +186,12 @@ pub fn multi_editor_tab(ui: &mut Ui, app: &mut App) {
                                 }
                                 let value = app.multi_values.get(field).to_string();
                                 let mut edited = value.clone();
-                                if field == Field::Genre {
-                                    // The original's Multi File Tag Editor genre
-                                    // box is an EDITABLE combo (ComboBoxGenres,
-                                    // Sorted, no Style property = the Delphi
-                                    // default csDropDown): pick from the list,
-                                    // type your own, add your own to the list.
-                                    let mut set: Option<String> = None;
-                                    let mut add: Option<String> = None;
-                                    ui.horizontal(|ui| {
-                                        let mut text = value.clone();
-                                        let r = ui.add(
-                                            egui::TextEdit::singleline(&mut text)
-                                                .desired_width(206.0)
-                                                .hint_text("pick or type"),
-                                        );
-                                        if r.changed() {
-                                            edited = text.clone();
-                                        }
-                                        let btn = ui.add(egui::Button::new("▾").small());
-                                        let popup_id = ui.scope_id().with("multi_genre_popup");
-                                        let picked = egui::Popup::from_toggle_button_response(&btn)
-                                            .id(popup_id)
-                                            .width(230.0)
-                                            .show(|ui| {
-                                                ui.set_min_width(ui.available_width());
-                                                egui::ScrollArea::vertical()
-                                                    .max_height(240.0)
-                                                    .show(ui, |ui| {
-                                                        let cur = text.trim().to_string();
-                                                        let mut s: Option<String> = None;
-                                                        let mut a: Option<String> = None;
-                                                        if !cur.is_empty()
-                                                            && !app
-                                                                .genres
-                                                                .iter()
-                                                                .any(|g| g.eq_ignore_ascii_case(&cur))
-                                                        {
-                                                            if ui
-                                                                .selectable_label(
-                                                                    false,
-                                                                    format!(
-                                                                        "Add \u{201c}{cur}\u{201d} to the genre list"
-                                                                    ),
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                                a = Some(cur.clone());
-                                                                s = Some(cur.clone());
-                                                            }
-                                                            ui.separator();
-                                                        }
-                                                        for g in app.genres.iter() {
-                                                            if ui
-                                                                .selectable_label(cur == *g, g.clone())
-                                                                .clicked()
-                                                            {
-                                                                s = Some(g.clone());
-                                                            }
-                                                        }
-                                                        (s, a)
-                                                    })
-                                                    .inner
-                                            });
-                                        if let Some(ir) = picked {
-                                            let (s, a) = ir.inner;
-                                            set = s;
-                                            add = a;
-                                        }
-                                    });
-                                    if let Some(v) = set {
-                                        edited = v;
-                                    }
-                                    if let Some(g) = add {
-                                        let g = g.trim().to_string();
-                                        if !g.is_empty()
-                                            && !app.genres.iter().any(|x| x.eq_ignore_ascii_case(&g))
-                                        {
-                                            app.genres.push(g);
-                                            app.genres.sort();
-                                        }
-                                    }
-                                } else {
-                                    let r = ui.add(
-                                        egui::TextEdit::singleline(&mut edited)
-                                            .desired_width(240.0)
-                                            .hint_text(""),
-                                    );
-                                    let _ = r;
-                                }
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut edited)
+                                        .desired_width(240.0)
+                                        .hint_text(""),
+                                );
+                                let _ = r;
                                 if edited != value {
                                     app.multi_values.set(field, &edited);
                                 }
@@ -348,6 +265,25 @@ pub fn f2t_example(app: &App, mask_text: &str) -> String {
         Ok(pairs) => mask::with_extension(mask::render_parsed(mask_text, &pairs), &f.extension()),
         Err(e) => e,
     }
+}
+
+/// Folder-mask preview: the folder that F6/F7 would rename, rendered with
+/// the same mask rules. No extension, because folders don't have one.
+pub fn folder_example(app: &App, mask_text: &str) -> String {
+    let Some(target) = app.folder_rename_target() else {
+        return mask::placeholder_name(mask_text);
+    };
+    let Some(row) = crate::data::read_folder_row(&target) else {
+        return mask::placeholder_name(mask_text);
+    };
+    let opts = mask::RenameOptions {
+        case: mask::Case::from_index(app.rename_case),
+        case_enabled: app.rename_case_enabled,
+        replace_spaces_with_underscores: app.replace_spaces,
+        remove_leading_zero_in_disc: app.remove_leading_zero_disc,
+    };
+    mask::build_new_name(&row, mask_text, 1, 1, &opts)
+        .unwrap_or_else(|| "(can't build: no tag data)".into())
 }
 
 /// The cover-art panels on the right of the tools bar. Both art boxes are

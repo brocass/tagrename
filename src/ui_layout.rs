@@ -21,7 +21,7 @@ pub fn update(app: &mut App, root: &mut Ui) {
     // folder scan needs a gentle poll so its progress reaches the screen.
     if app.shot.is_some() {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
-    } else if app.loading.is_some() || app.toast.is_some() {
+    } else if app.loading.is_some() || app.toast.is_some() || app.dlg.native_pick.busy() {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 
@@ -119,7 +119,7 @@ fn window_chrome(root: &mut Ui, ctx: &Context) {
             ui.painter().text(
                 bar.left_center() + egui::vec2(118.0, 0.0),
                 egui::Align2::LEFT_CENTER,
-                "1.1.3",
+                "1.1.6",
                 egui::FontId::proportional(12.0),
                 c_text_dim(),
             );
@@ -265,11 +265,11 @@ fn menu_bar(app: &mut App, root: &mut Ui, ctx: &Context) {
                     if menu_item(ui, "Edit File Tag (F5)").clicked() {
                         app.open_tag_editor_focused();
                     }
-                    if menu_item(ui, "Edit File/Folder Name (F6)").clicked() {
-                        app.say("Rename files with the mask on the \"Rename Files\" tab below.");
+                    if menu_item(ui, "Edit File Name (F6)").clicked() {
+                        app.open_file_name_mask_editor();
                     }
                     if menu_item(ui, "Rename Folder (F7)").clicked() {
-                        app.say("Open the folder, then use \"Rename Files\" with a mask like %1\\%2.");
+                        app.open_folder_mask_editor();
                     }
                     ui.separator();
                     if menu_item(ui, "Play File (Ctrl+P)").clicked() {
@@ -297,12 +297,7 @@ fn menu_bar(app: &mut App, root: &mut Ui, ctx: &Context) {
                     }
                     ui.separator();
                     if menu_item(ui, "Delete").clicked() {
-                        let indices = app.checked_indices();
-                        if indices.is_empty() {
-                            app.warn("Nothing to delete — check files first.");
-                        } else {
-                            app.delete_files(&indices);
-                        }
+                        app.ask_delete_selected();
                     }
                     ui.separator();
                     if menu_item(ui, "Exit").clicked() {
@@ -338,10 +333,35 @@ fn menu_bar(app: &mut App, root: &mut Ui, ctx: &Context) {
                         app.show_folders = !app.show_folders;
                     }
                     ui.separator();
-                    if menu_item(ui, "Search Subfolders").clicked() {
-                        app.search_subfolders = !app.search_subfolders;
+                    if ui.checkbox(&mut app.search_subfolders, "Search Subfolders").changed() {
+                        if !app.search_subfolders {
+                            app.flat_file_search = false;
+                        }
                         if let Some(folder) = app.folder.clone() {
                             app.load_folder(&folder);
+                        }
+                    }
+                    if ui.checkbox(&mut app.flat_file_search, "Flat File Search").changed() {
+                        if app.flat_file_search {
+                            app.search_subfolders = true;
+                        }
+                        if let Some(folder) = app.folder.clone() {
+                            app.load_folder(&folder);
+                        }
+                    }
+                    ui.separator();
+                    if menu_item(ui, "Expand All Folders").clicked() {
+                        if !app.search_subfolders || app.flat_file_search {
+                            app.warn("Expand All Folders needs Search Subfolders with Flat File Search off.");
+                        } else {
+                            app.expand_all_rows();
+                        }
+                    }
+                    if menu_item(ui, "Collapse All Folders").clicked() {
+                        if !app.search_subfolders || app.flat_file_search {
+                            app.warn("Collapse All Folders needs Search Subfolders with Flat File Search off.");
+                        } else {
+                            app.collapse_all_rows();
                         }
                     }
                     ui.separator();
@@ -464,7 +484,7 @@ fn menu_bar(app: &mut App, root: &mut Ui, ctx: &Context) {
                         app.remove_spaces(true);
                     }
                     ui.separator();
-                    if menu_item(ui, "Export/Import Tags...").clicked() {
+                    if menu_item(ui, "Export Tags...").clicked() {
                         app.dlg.show_export = true;
                     }
                 });
@@ -472,9 +492,6 @@ fn menu_bar(app: &mut App, root: &mut Ui, ctx: &Context) {
                 ui.menu_button("Options", |ui| {
                     if menu_item(ui, "Program Options...").clicked() {
                         app.dlg.show_options = true;
-                    }
-                    if menu_item(ui, "Genre List Editor...").clicked() {
-                        app.dlg.show_genre_editor = true;
                     }
                 });
 
@@ -551,6 +568,15 @@ fn toolbar(app: &mut App, root: &mut Ui, _ctx: &Context) {
                     if compact_tool_button(ui, "✎ Edit Tag", "Edit the focused file's tag (F5)").clicked() {
                         app.open_tag_editor_focused();
                     }
+                    if compact_tool_button(
+                        ui,
+                        "✎ Edit Selected Tags",
+                        "Edit selected files in the Tag Editor",
+                    )
+                    .clicked()
+                    {
+                        app.open_tag_editor();
+                    }
                     if compact_tool_button(ui, "⧉ Copy Tag", "Copy tag (Ctrl+Shift+C)").clicked() {
                         app.copy_tag();
                     }
@@ -567,6 +593,17 @@ fn toolbar(app: &mut App, root: &mut Ui, _ctx: &Context) {
                     ui.separator();
                     let sub = &mut app.search_subfolders;
                     if ui.checkbox(sub, "Search Subfolders").changed() {
+                        if !app.search_subfolders {
+                            app.flat_file_search = false;
+                        }
+                        if let Some(folder) = app.folder.clone() {
+                            app.load_folder(&folder);
+                        }
+                    }
+                    if ui.checkbox(&mut app.flat_file_search, "Flat File Search").changed() {
+                        if app.flat_file_search {
+                            app.search_subfolders = true;
+                        }
                         if let Some(folder) = app.folder.clone() {
                             app.load_folder(&folder);
                         }
@@ -1490,6 +1527,19 @@ fn shortcuts(app: &mut App, ctx: &Context) {
     }
     if ctx.input(|i| i.key_pressed(Key::F5)) {
         app.open_tag_editor_focused();
+    }
+    if ctx.input(|i| i.key_pressed(Key::F6)) {
+        app.open_file_name_mask_editor();
+    }
+    if ctx.input(|i| i.key_pressed(Key::F7)) {
+        app.open_folder_mask_editor();
+    }
+    if ctx.input(|i| i.key_pressed(Key::Delete))
+        && !ctx.egui_wants_keyboard_input()
+        && app.dlg.confirm_delete.is_none()
+        && app.dlg.tag_editor.is_none()
+    {
+        app.ask_delete_selected();
     }
     if ctx.input(|i| i.key_pressed(Key::F8)) {
         app.show_tools_bar = !app.show_tools_bar;

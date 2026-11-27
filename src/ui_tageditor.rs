@@ -147,30 +147,80 @@ fn split_pair(text: &str) -> (String, String) {
 
 /// One label + widget row (no tick box — the person asked for none).
 ///
-/// `genre_add` collects an "add my own genre to the list" request from
-/// the Genre row's dropdown (applied by the caller, which owns App).
+/// The Rating dropdown, drawn outside the grid so its width and position
+/// can differ from the other value boxes.
+fn rating_combo(ui: &mut Ui, ed: &mut TagEditor, width: f32) {
+    let value = ed.values.get(Field::Rating).to_string();
+    let stars = crate::tools::stars_from_rating(&value);
+    let mut edited = value.clone();
+    let mut changed = false;
+    egui::ComboBox::from_id_salt("rating_combo")
+        .selected_text(crate::tools::rating_from_stars(stars))
+        .width(width)
+        .show_ui(ui, |ui| {
+            for r in crate::tools::RATINGS.iter() {
+                // RATINGS is in the original's descending order
+                // (index 0 = 5 Stars), so compare through the mapping
+                // instead of the loop index.
+                if ui.selectable_label(stars == crate::tools::stars_from_rating(r), *r).clicked() {
+                    edited = (*r).to_string();
+                    changed = true;
+                }
+            }
+        });
+    if changed {
+        ed.values.set(Field::Rating, &edited);
+    }
+}
+
 fn field_row(
     ui: &mut Ui,
     ed: &mut TagEditor,
     field: Field,
     width: f32,
-    genres: &[String],
-    genre_add: &mut Option<String>,
 ) {
     let label = field.label();
     let active = !ed.multi || ed.enabled.contains(&field);
+    let _single_col_tab = matches!(ed.tab, 1 | 2 | 4);
+    let label_w = if ed.tab == 1 {
+        (width * 0.42).clamp(210.0, 250.0)
+    } else if ed.tab == 4 {
+        (width * 0.38).clamp(130.0, 160.0)
+    } else if ed.tab == 2 {
+        (width * 0.30).clamp(96.0, 130.0)
+    } else {
+        (width * 0.30).clamp(96.0, 130.0)
+    };
     if ed.multi {
         let mut on = ed.enabled.contains(&field);
-        if ui.checkbox(&mut on, label).changed() {
-            if on {
-                ed.enabled.push(field);
-            } else {
-                ed.enabled.retain(|f| *f != field);
-            }
-        }
+        ui.allocate_ui_with_layout(
+            egui::vec2(label_w, 20.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                let resp = ui.checkbox(&mut on, egui::RichText::new(label).size(13.5));
+                if resp.changed() {
+                    if on {
+                        ed.enabled.push(field);
+                    } else {
+                        ed.enabled.retain(|f| *f != field);
+                    }
+                }
+            },
+        );
     } else {
-        ui.add(egui::Label::new(label).selectable(false));
+        ui.allocate_ui_with_layout(
+            egui::vec2(label_w, 20.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add(
+                    egui::Label::new(egui::RichText::new(label).size(13.5))
+                        .selectable(false)
+                        .truncate(),
+                );
+            },
+        );
     }
+    let widget_w = (width - label_w - 8.0).max(80.0);
     let value = ed.values.get(field).to_string();
     let mut edited = value.clone();
     let mut changed = false;
@@ -179,92 +229,12 @@ fn field_row(
             ui.disable();
         }
         match field {
-        Field::Genre => {
-            // The original's Genre field is an EDITABLE combo: the
-            // tageditor DFM's TComboBox.ComboBoxGenre (file offset
-            // 0xaa8be3) has no Style property, so it keeps the Delphi
-            // default csDropDown, with Sorted set — the person asked
-            // for exactly that back: pick a genre from the list, type
-            // your own, and add your own to the list.
-            let mut set: Option<String> = None;
-            let mut add: Option<String> = None;
-            ui.horizontal(|ui| {
-                let mut text = value.clone();
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut text)
-                        .desired_width((width - 36.0).max(90.0))
-                        .hint_text("pick or type"),
-                );
-                if r.changed() {
-                    edited = text.clone();
-                    changed = true;
-                }
-                let btn = ui.add(egui::Button::new("▾").small());
-                let popup_id = ui.scope_id().with("tag_editor_genre_popup");
-                let picked = egui::Popup::from_toggle_button_response(&btn)
-                    .id(popup_id)
-                    .width(230.0)
-                    .show(|ui| {
-                        ui.set_min_width(ui.available_width());
-                        egui::ScrollArea::vertical()
-                            .max_height(240.0)
-                            .show(ui, |ui| {
-                                let cur = text.trim().to_string();
-                                let mut s: Option<String> = None;
-                                let mut a: Option<String> = None;
-                                if !cur.is_empty()
-                                    && !genres.iter().any(|g| g.eq_ignore_ascii_case(&cur))
-                                {
-                                    if ui
-                                        .selectable_label(
-                                            false,
-                                            format!(
-                                                "Add \u{201c}{cur}\u{201d} to the genre list"
-                                            ),
-                                        )
-                                        .clicked()
-                                    {
-                                        a = Some(cur.clone());
-                                        s = Some(cur.clone());
-                                    }
-                                    ui.separator();
-                                }
-                                if genres.is_empty() {
-                                    ui.label("The genre list is empty — type your own.");
-                                }
-                                for g in genres {
-                                    if ui.selectable_label(cur == *g, g.clone()).clicked() {
-                                        s = Some(g.clone());
-                                    }
-                                }
-                                (s, a)
-                            })
-                            .inner
-                    });
-                if let Some(ir) = picked {
-                    let (s, a) = ir.inner;
-                    set = s;
-                    add = a;
-                }
-            });
-            if let Some(v) = set {
-                edited = v;
-                changed = true;
-            }
-            if let Some(g) = add {
-                *genre_add = Some(g);
-            }
-            if changed {
-                ed.values.set(field, &edited);
-            }
-            None::<egui::Response>
-        }
         Field::Rating => {
             let stars = crate::tools::stars_from_rating(&value);
             let mut changed = false;
             egui::ComboBox::from_id_salt("rating_combo")
                 .selected_text(crate::tools::rating_from_stars(stars))
-                .width(width * 0.6)
+                .width(widget_w)
                 .show_ui(ui, |ui| {
                     for r in crate::tools::RATINGS.iter() {
                         // RATINGS is in the original's descending order
@@ -284,16 +254,16 @@ fn field_row(
             None::<egui::Response>
         }
         Field::Comment => {
-            // A long comment scrolls inside a fixed-height box instead of
-            // growing the box (and pushing every field below it).
+            // Comment fills roughly three lines and can scroll beyond that.
             let r = egui::ScrollArea::vertical()
                 .id_salt("editor_comment_box")
-                .max_height(44.0)
+                .max_height(72.0)
                 .show(ui, |ui| {
                     ui.add(
                         egui::TextEdit::multiline(&mut edited)
-                            .desired_width(width)
-                            .desired_rows(2)
+                            .desired_width(widget_w)
+                            .desired_rows(3)
+                            .min_size(egui::vec2(widget_w, 56.0))
                             .hint_text(""),
                     )
                 })
@@ -312,10 +282,9 @@ fn field_row(
                 (&ed.values.disc, &ed.values.disc_total)
             };
             let mut text = merged_pair(a, b);
-            let r = ui.add(
-                egui::TextEdit::singleline(&mut text)
-                    .desired_width(width)
-                    .hint_text(""),
+            let r = ui.add_sized(
+                [widget_w, 20.0],
+                egui::TextEdit::singleline(&mut text).hint_text(""),
             );
             if r.changed() {
                 let (v, total) = split_pair(&text);
@@ -331,17 +300,16 @@ fn field_row(
         }
         Field::Compilation => {
             let mut on = ed.values.compilation == Some(true);
-            let r = ui.checkbox(&mut on, "");
+            let r = ui.add_sized([18.0, 20.0], egui::Checkbox::new(&mut on, ""));
             if r.changed() {
                 ed.values.compilation = Some(on);
             }
             Some(r)
         }
         _ => {
-            let r = ui.add(
-                egui::TextEdit::singleline(&mut edited)
-                    .desired_width(width)
-                    .hint_text(""),
+            let r = ui.add_sized(
+                [widget_w, 20.0],
+                egui::TextEdit::singleline(&mut edited).hint_text(""),
             );
             if r.changed() {
                 ed.values.set(field, &edited);
@@ -602,16 +570,9 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
     ui.separator();
 
     ui.horizontal(|ui| {
-        for (i, name) in [
-            "General",
-            "MusicBrainz",
-            "ReplayGain",
-            "Additional",
-            "Lyrics",
-            "Sorting",
-        ]
-        .iter()
-        .enumerate()
+        for (i, name) in ["General", "MusicBrainz", "ReplayGain", "Lyrics", "Sorting"]
+            .iter()
+            .enumerate()
         {
             if ui.selectable_label(ed.tab == i, *name).clicked() {
                 ed.tab = i;
@@ -635,15 +596,8 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
     });
     ui.add_space(2.0);
 
-    // The genre list the field rows need (cloned once so the closures
-    // below do not have to borrow the whole App).
-    let genres = app.genres.clone();
-    // A genre the person asked to add to the list (from the Genre
-    // row's dropdown).
-    let mut genre_add: Option<String> = None;
-
     match ed.tab {
-        4 => lyrics_tab(ui, app, ed, bottom),
+        3 => lyrics_tab(ui, app, ed, bottom),
         _ => {
             // Two columns of fields (the person's request), plus the
             // cover-art area on the right. Every column is bounded so
@@ -658,41 +612,75 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
             );
             ui.allocate_rect(field_area, egui::Sense::hover());
             let avail = field_area.width();
-            let art_w = (avail * 0.20).clamp(120.0, 170.0);
+            let base_art_w = (avail * 0.18).clamp(110.0, 150.0);
+            // The art box uses the General tab's larger size on every
+            // field tab (MusicBrainz, ReplayGain and Sorting too).
+            let art_w = (avail * 0.22).clamp(150.0, 190.0);
             let art_rect = egui::Rect::from_min_max(
                 egui::pos2(field_area.max.x - art_w, field_area.min.y),
                 field_area.max,
             );
-            // Two 8 px gaps separate the two field columns and the Art box.
-            let col_w = ((avail - art_w - 16.0) / 2.0).max(150.0);
+            // General tab: two equal columns + art on right. Keep columns inside
+            // the available width so the right column never slides under art.
+            let single_col = matches!(ed.tab, 1 | 2 | 4);
+            let base_col_gap = 4.0f32;
+            let base_art_gap = 6.0f32;
+            let base_col_w = ((avail - base_art_w - base_col_gap - base_art_gap) / 2.0).max(160.0);
+            let base_label_w = (base_col_w * 0.44).clamp(96.0, 136.0);
+            let base_widget_w = (base_col_w - base_label_w - 8.0).max(80.0);
+
+            let rg_label_w = (base_col_w * 0.30).clamp(96.0, 130.0);
+            let rg_col_w = (rg_label_w + 8.0 + base_widget_w).min((avail - base_art_w - base_art_gap).max(320.0));
+
+            let art_gap = 6.0f32;
+            let (col_w, col_gap, art_gap) = if ed.tab == 1 {
+                let label_w = (base_col_w * 0.52).clamp(210.0, 250.0);
+                let widget_w = (base_widget_w + 120.0).max(300.0);
+                let one_w = (label_w + 8.0 + widget_w).min((avail - art_w - art_gap).max(560.0));
+                (one_w, 0.0f32, art_gap)
+            } else if matches!(ed.tab, 2 | 4) {
+                let label_w = if ed.tab == 4 {
+                    (base_col_w * 0.38).clamp(130.0, 160.0)
+                } else {
+                    rg_label_w
+                };
+                let one_w = (label_w + 8.0 + base_widget_w).min((avail - art_w - art_gap).max(320.0));
+                (one_w, 0.0f32, art_gap)
+            } else {
+                // General: same column/label/widget sizing as ReplayGain, tight gap.
+                let col_gap = 0.0f32;
+                let art_gap = 10.0f32;
+                let max_each = ((avail - art_w - col_gap - art_gap) / 2.0).max(120.0);
+                let col_w = rg_col_w.min(max_each);
+                (col_w, col_gap, art_gap)
+            };
             {
-                // Tabs: General, MusicBrainz, ReplayGain, Additional,
-                // Lyrics, Sorting. Additional holds the former Additional
-                // and More Additional pages (the podcast/TV fields also
-                // back %swt/%eid/%snr/%enr).
+                // Tabs: General, MusicBrainz, ReplayGain, Lyrics, Sorting.
                 let (col_a, col_b): (&[Field], &[Field]) = match ed.tab {
                     0 => (
                         &[
                             Field::Title,
                             Field::Artist,
-                            Field::Album,
                             Field::AlbumArtist,
+                            Field::Album,
                             Field::Year,
                             Field::Genre,
                             Field::Track,
                             Field::Disc,
+                            Field::Catalog,
+                            Field::Isrc,
                             Field::Bpm,
                             Field::Mood,
                         ],
                         &[
-                            Field::Comment,
+                            Field::Label,
+                            Field::RemixedBy,
                             Field::Composer,
                             Field::OrigArtist,
                             Field::Copyright,
                             Field::Url,
                             Field::EncodedBy,
-                            Field::Rating,
-                            Field::Compilation,
+                            Field::Comment,
                         ],
                     ),
                     1 => (
@@ -721,37 +709,6 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
                         ],
                         &[],
                     ),
-                    3 => (
-                        &[
-                            Field::Conductor,
-                            Field::Lyricist,
-                            Field::OrigLyricist,
-                            Field::Label,
-                            Field::RemixedBy,
-                            Field::Isrc,
-                            Field::Catalog,
-                            Field::InitialKey,
-                            Field::RadioName,
-                            Field::Grouping,
-                            Field::Subtitle,
-                            Field::ShowTitle,
-                            Field::EpisodeId,
-                            Field::SeasonNumber,
-                            Field::EpisodeNumber,
-                        ],
-                        &[
-                            Field::FilePage,
-                            Field::ArtistPage,
-                            Field::SourcePage,
-                            Field::RadioPage,
-                            Field::BuyPage,
-                            Field::ReleaseTime,
-                            Field::PodcastCategory,
-                            Field::PodcastDescription,
-                            Field::PodcastId,
-                            Field::PodcastUrl,
-                        ],
-                    ),
                     _ => (
                         &[
                             Field::SortTitle,
@@ -765,68 +722,187 @@ fn body(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, keep: &mut bool, below: 
                         ],
                     ),
                 };
-                if matches!(ed.tab, 1 | 2 | 5) {
-                    // MusicBrainz, ReplayGain and Sorting: every field sits
-                    // in one single column, each with its label.
-                    let one_w = (avail - art_w - 8.0).max(200.0);
-                    let tick_w = if ed.multi { 22.0 } else { 0.0 };
-                    let widget_w = (one_w - 130.0 - tick_w).max(90.0);
+                if single_col {
+                    // MusicBrainz, ReplayGain and Sorting: one column + Art.
+                    let one_w = col_w.min((avail - art_w - art_gap).max(120.0));
                     let all: Vec<Field> = col_a.iter().chain(col_b.iter()).copied().collect();
                     let one_rect = egui::Rect::from_min_size(
                         field_area.min,
                         egui::vec2(one_w, field_area.height()),
                     );
                     let mut one = ui.new_child(egui::UiBuilder::new().max_rect(one_rect));
+                    one.set_clip_rect(one_rect);
                     one.vertical(|ui| {
                         ui.set_min_width(one_w);
                         ui.set_max_width(one_w);
                         egui::Grid::new("editor_single_col")
                             .num_columns(2)
                             .spacing([8.0, 4.0])
+                            .min_col_width(0.0)
                             .show(ui, |ui| {
                                 for f in all.iter() {
-                                    field_row(ui, ed, *f, widget_w, &genres, &mut genre_add);
+                                    field_row(ui, ed, *f, one_w);
                                     ui.end_row();
                                 }
                             });
                     });
                     let mut art = ui.new_child(egui::UiBuilder::new().max_rect(art_rect));
+                    art.set_clip_rect(art_rect);
                     art_panel(&mut art, app, ed, art_w);
                 } else {
+                    // General: two equal field columns, art on the right.
+                    let total_cols_w = (col_w * 2.0 + col_gap).min((avail - art_w - art_gap).max(120.0));
+                    let col_w = ((total_cols_w - col_gap) / 2.0).max(100.0);
                     for (n, col) in [col_a, col_b].into_iter().enumerate() {
-                        let x = field_area.min.x + n as f32 * (col_w + 8.0);
+                        let x = field_area.min.x + n as f32 * (col_w + col_gap);
                         let col_rect = egui::Rect::from_min_size(
                             egui::pos2(x, field_area.min.y),
                             egui::vec2(col_w, field_area.height()),
                         );
                         let mut colui = ui.new_child(egui::UiBuilder::new().max_rect(col_rect));
+                        colui.set_clip_rect(col_rect);
                         colui.vertical(|ui| {
                             ui.set_min_width(col_w);
                             ui.set_max_width(col_w);
-                            let tick_w = if ed.multi { 22.0 } else { 0.0 };
-                            let widget_w = (col_w - 130.0 - tick_w).max(90.0);
                             egui::Grid::new(format!("editor_col_{n}"))
                                 .num_columns(2)
-                                .spacing([8.0, 4.0])
+                                .spacing([6.0, 4.0])
+                                .min_col_width(0.0)
                                 .show(ui, |ui| {
                                     for f in col.iter() {
-                                        field_row(ui, ed, *f, widget_w, &genres, &mut genre_add);
+                                        field_row(ui, ed, *f, col_w);
                                         ui.end_row();
                                     }
                                 });
+                            if n == 1 {
+                                // Rating and "Part of a compilation" get their
+                                // own rows with their own dimensions: the long
+                                // compilation title would widen the grid's
+                                // shared label column and push every value box
+                                // out of the column. Both labels sit left-
+                                // aligned, and the dropdown and the tick start
+                                // at the same point, clear of the title.
+                                ui.add_space(4.0);
+                                let title = "Part of a compilation";
+                                let title_w = ui
+                                    .painter()
+                                    .layout(
+                                        title.to_owned(),
+                                        egui::FontId::proportional(13.5),
+                                        c_text(),
+                                        10000.0,
+                                    )
+                                    .size()
+                                    .x;
+                                // The value column starts after the long title
+                                // (a little further in multi mode, where the
+                                // title is the enable-tick's own label).
+                                let value_x = if ed.multi {
+                                    title_w + 32.0
+                                } else {
+                                    title_w + 10.0
+                                };
+                                let combo_w = (col_w - value_x - 4.0).clamp(60.0, 90.0);
+
+                                // Rating: label left-aligned, narrow dropdown.
+                                let rating_active =
+                                    !ed.multi || ed.enabled.contains(&Field::Rating);
+                                ui.horizontal(|ui| {
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(value_x, 20.0),
+                                        Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            if ed.multi {
+                                                let mut on =
+                                                    ed.enabled.contains(&Field::Rating);
+                                                let r = ui.checkbox(
+                                                    &mut on,
+                                                    egui::RichText::new("Rating").size(13.5),
+                                                );
+                                                if r.changed() {
+                                                    if on {
+                                                        ed.enabled.push(Field::Rating);
+                                                    } else {
+                                                        ed.enabled.retain(|f| *f != Field::Rating);
+                                                    }
+                                                }
+                                            } else {
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        egui::RichText::new("Rating").size(13.5),
+                                                    )
+                                                    .selectable(false),
+                                                );
+                                            }
+                                        },
+                                    );
+                                    if !rating_active {
+                                        ui.scope(|ui| {
+                                            ui.disable();
+                                            rating_combo(ui, ed, combo_w);
+                                        });
+                                    } else {
+                                        rating_combo(ui, ed, combo_w);
+                                    }
+                                });
+
+                                // Part of a compilation: title left-aligned,
+                                // tick starting at the same x as the dropdown.
+                                let comp_active = !ed.multi
+                                    || ed.enabled.contains(&Field::Compilation);
+                                ui.horizontal(|ui| {
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(value_x, 20.0),
+                                        Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            if ed.multi {
+                                                let mut on =
+                                                    ed.enabled.contains(&Field::Compilation);
+                                                let r = ui.checkbox(
+                                                    &mut on,
+                                                    egui::RichText::new(title).size(13.5),
+                                                );
+                                                if r.changed() {
+                                                    if on {
+                                                        ed.enabled.push(Field::Compilation);
+                                                    } else {
+                                                        ed.enabled
+                                                            .retain(|f| *f != Field::Compilation);
+                                                    }
+                                                }
+                                            } else {
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        egui::RichText::new(title).size(13.5),
+                                                    )
+                                                    .selectable(false),
+                                                );
+                                            }
+                                        },
+                                    );
+                                    if !comp_active {
+                                        ui.scope(|ui| {
+                                            ui.disable();
+                                            let mut val = ed.values.compilation == Some(true);
+                                            let vr = ui.checkbox(&mut val, "");
+                                            if vr.changed() {
+                                                ed.values.compilation = Some(val);
+                                            }
+                                        });
+                                    } else {
+                                        let mut val = ed.values.compilation == Some(true);
+                                        let vr = ui.checkbox(&mut val, "");
+                                        if vr.changed() {
+                                            ed.values.compilation = Some(val);
+                                        }
+                                    }
+                                });
+                            }
                         });
                     }
                     let mut art = ui.new_child(egui::UiBuilder::new().max_rect(art_rect));
+                    art.set_clip_rect(art_rect);
                     art_panel(&mut art, app, ed, art_w);
-                }
-            }
-            // Apply a genre the person added from the dropdown.
-            if let Some(g) = genre_add.take() {
-                let g = g.trim().to_string();
-                if !g.is_empty() && !app.genres.iter().any(|x| x.eq_ignore_ascii_case(&g)) {
-                    app.genres.push(g);
-                    app.genres.sort();
-                    app.say("Added to the genre list.");
                 }
             }
         }
@@ -1029,9 +1105,9 @@ fn art_panel(ui: &mut Ui, app: &mut App, ed: &mut TagEditor, art_w: f32) {
             let info = match (&staged, &tex) {
                 (Some((mime, _)), Some(t)) => {
                     let [w, h] = t.size();
-                    format!("Picture: {w} x {h}, {mime}")
+                    format!("{w} x {h}, {mime}")
                 }
-                (Some((mime, _)), None) => format!("Picture: {mime}"),
+                (Some((mime, _)), None) => mime.clone(),
                 (None, _) => "No album art".to_string(),
             };
             ui.label(RichText::new(info).color(c_text_dim()).size(13.0));

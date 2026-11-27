@@ -8,8 +8,8 @@
 use eframe::egui;
 
 mod data;
-mod genres;
 mod mask;
+mod native_picker;
 mod places;
 mod theme;
 mod tools;
@@ -202,7 +202,7 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             // The theme and colour scheme picked last time are restored.
             // Without a saved choice the app opens on the Default theme
-            // in its modern dark scheme (screenshot runs use the same default).
+            // in its light scheme.
             theme::install_fonts(&cc.egui_ctx);
             // Custom themes are appended after the built-ins, so load them
             // before the saved numeric theme index is restored.
@@ -210,6 +210,8 @@ fn main() -> eframe::Result<()> {
             if !screenshot_mode {
                 if let Some((t, s)) = theme::saved_choice() {
                     theme::select(&cc.egui_ctx, t, s);
+                } else {
+                    theme::select(&cc.egui_ctx, 0, theme::SCHEME_LIGHT);
                 }
             }
             theme::install(&cc.egui_ctx);
@@ -217,7 +219,9 @@ fn main() -> eframe::Result<()> {
                 let t = std::env::var("TAGRENAME_THEME").ok().and_then(|t| t.trim().parse::<usize>().ok());
                 let s = std::env::var("TAGRENAME_SCHEME").ok().and_then(|t| t.trim().parse::<usize>().ok());
                 if t.is_some() || s.is_some() {
-                    theme::select(&cc.egui_ctx, t.unwrap_or(0), s.unwrap_or(theme::SCHEME_DARK));
+                    theme::select(&cc.egui_ctx, t.unwrap_or(0), s.unwrap_or(theme::SCHEME_LIGHT));
+                } else {
+                    theme::select(&cc.egui_ctx, 0, theme::SCHEME_LIGHT);
                 }
             }
             // The original's dialogs open at their designed position every

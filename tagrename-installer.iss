@@ -1,5 +1,5 @@
 #define MyAppName "Tag:Rename"
-#define MyAppVersion "1.1.3"
+#define MyAppVersion "1.1.6"
 #define MyAppPublisher "Steven Davis"
 #define MyAppExeName "tagrename.exe"
 
@@ -18,7 +18,7 @@ WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
 OutputDir=dist
-OutputBaseFilename=Tag-Rename-1.1.3-setup
+OutputBaseFilename=Tag-Rename-1.1.6-setup
 
 [Files]
 Source: "target\release\{#MyAppExeName}"; DestDir: "{app}"; DestName: "Tag-Rename.exe"; Flags: ignoreversion
@@ -145,6 +145,19 @@ Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp+\shell\TagRenam
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
+[InstallDelete]
+; Clear old shortcuts/icon cache hints so Windows is more likely to show
+; the new app icon after an upgrade/reinstall.
+Type: files; Name: "{group}\Tag-Rename.lnk"
+Type: files; Name: "{autodesktop}\Tag-Rename.lnk"
+Type: files; Name: "{localappdata}\IconCache.db"
+Type: filesandordirs; Name: "{localappdata}\Microsoft\Windows\Explorer\iconcache*"
+
 [Icons]
 Name: "{group}\Tag-Rename"; Filename: "{app}\Tag-Rename.exe"; IconFilename: "{app}\tagrename.ico"
 Name: "{autodesktop}\Tag-Rename"; Filename: "{app}\Tag-Rename.exe"; Tasks: desktopicon; IconFilename: "{app}\tagrename.ico"
+
+[Run]
+; Best-effort icon cache refresh. Ignore failures/non-zero exits.
+Filename: "ie4uinit.exe"; Parameters: "-show"; Flags: runhidden; StatusMsg: "Refreshing icons..."
+Filename: "ie4uinit.exe"; Parameters: "-ClearIconCache"; Flags: runhidden; StatusMsg: "Refreshing icons..."

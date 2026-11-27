@@ -248,7 +248,7 @@ fn build_themes() -> Vec<Theme> {
     vec![
         Theme {
             name: "Default".into(),
-            dark: scheme(true, 0x0f1115, 0x171a21, 0x232832, 0xe6e9ef, 0x8b93a7, 0x5b8cff, 0x2a2f3a),
+            dark: scheme(true, 0x1b212d, 0x242b38, 0x303846, 0xe6e9ef, 0x8b93a7, 0x5b8cff, 0x353e4d),
             light: scheme(false, 0xefefef, 0xffffff, 0xf1f1f1, 0x161616, 0x6b6b6b, 0x2150b5, 0xdedede),
         },
         Theme {
@@ -332,7 +332,7 @@ struct PreviewState {
 static PREVIEW: RwLock<Option<PreviewState>> = RwLock::new(None);
 
 static THEME: AtomicUsize = AtomicUsize::new(0);
-static SCHEME: AtomicUsize = AtomicUsize::new(SCHEME_DARK);
+static SCHEME: AtomicUsize = AtomicUsize::new(SCHEME_LIGHT);
 /// What the operating system asked for last time we looked. Used when the
 /// scheme is System; dark when the system does not say.
 static SYSTEM_DARK: AtomicBool = AtomicBool::new(true);

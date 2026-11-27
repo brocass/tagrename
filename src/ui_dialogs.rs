@@ -1,12 +1,13 @@
 //! All secondary windows: previews, mask editor, export, auto fill, find,
 //! folder/file chooser, options, genre editor, about, confirmations.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use egui::{RichText, Ui};
 
 use crate::data::{Field, EXPORT_FIELDS, ALL_FIELDS};
 use crate::mask;
+use crate::native_picker;
 use crate::theme;
 use crate::theme::*;
 use crate::ui::App;
@@ -83,6 +84,25 @@ pub enum ChooseDone {
     Folder(PathBuf),
     SavePath(PathBuf),
     Bytes(Vec<u8>),
+}
+
+/// Which mask the editor is editing. Folder renaming needs its own mask
+/// (and its own saved value) so F6/F7 never overwrite the file masks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaskKind {
+    Rename,
+    FileToTag,
+    Folder,
+}
+
+impl MaskKind {
+    fn id(self) -> u8 {
+        match self {
+            MaskKind::Rename => 0,
+            MaskKind::FileToTag => 1,
+            MaskKind::Folder => 2,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -289,7 +309,11 @@ pub struct Dialogs {
     /// The Tag Editor's size when it is not full screen; kept while the
     /// app runs so the next opening starts at the same size.
     pub editor_size: Option<egui::Vec2>,
-    pub show_mask_editor: Option<usize>,
+    pub show_mask_editor: Option<MaskKind>,
+    /// Folder whose name F6/F7 will change once the mask is accepted.
+    pub folder_rename_target: Option<PathBuf>,
+    /// File indices that F6 should rename when the mask is accepted.
+    pub file_rename_targets: Vec<usize>,
     /// The mask as it was when the Mask Editor opened; Cancel puts it back.
     pub mask_backup: String,
     /// Masks saved from the Mask Editor for this session.
@@ -316,10 +340,13 @@ pub struct Dialogs {
     pub find_match_case: bool,
     pub show_about: bool,
     pub show_options: bool,
-    pub show_genre_editor: bool,
-    pub new_genre: String,
     pub choose: Option<ChooseState>,
+    /// One OS-native picker at a time. `native_theme` says whether its
+    /// result belongs to the theme path row or to the general chooser.
+    pub native_pick: native_picker::State,
+    pub native_theme: bool,
     pub confirm_remove: Option<Vec<usize>>,
+    pub confirm_delete: Option<Vec<usize>>,
     /// The Advanced… swap dialog and the Copy Text from One Tag Field to
     /// Another dialog (both pick any two fields).
     pub swap_advanced: bool,
@@ -339,6 +366,8 @@ impl Default for Dialogs {
             tag_editor: None,
             editor_size: None,
             show_mask_editor: None,
+            folder_rename_target: None,
+            file_rename_targets: Vec::new(),
             mask_backup: String::new(),
             saved_masks: Vec::new(),
             saved_mask_sel: None,
@@ -362,10 +391,11 @@ impl Default for Dialogs {
             find_match_case: false,
             show_about: false,
             show_options: false,
-            show_genre_editor: false,
-            new_genre: String::new(),
             choose: None,
+            native_pick: native_picker::State::default(),
+            native_theme: false,
             confirm_remove: None,
+            confirm_delete: None,
             swap_advanced: false,
             copy_field_open: false,
             swap_from: 0,
@@ -384,9 +414,29 @@ impl Dialogs {
     }
 
     pub fn open_mask_editor(&mut self, which: usize, current: &str) {
-        self.show_mask_editor = Some(which);
+        let kind = match which {
+            0 => MaskKind::Rename,
+            _ => MaskKind::FileToTag,
+        };
+        self.open_mask_editor_kind(kind, current);
+    }
+
+    pub fn open_mask_editor_kind(&mut self, kind: MaskKind, current: &str) {
+        self.show_mask_editor = Some(kind);
         self.mask_backup = current.to_string();
         self.saved_mask_sel = None;
+    }
+
+    pub fn open_folder_mask_editor(&mut self, current: &str, target: PathBuf) {
+        self.folder_rename_target = Some(target);
+        self.file_rename_targets.clear();
+        self.open_mask_editor_kind(MaskKind::Folder, current);
+    }
+
+    pub fn open_file_name_mask_editor(&mut self, current: &str, targets: Vec<usize>) {
+        self.folder_rename_target = None;
+        self.file_rename_targets = targets;
+        self.open_mask_editor_kind(MaskKind::Rename, current);
     }
 
     /// Open the Create theme panel. A custom theme is opened for editing;
@@ -508,12 +558,19 @@ fn appearance_window(ctx: &egui::Context, app: &mut App) {
     let cur_theme = theme_index();
     let cur_scheme = scheme_index();
     let (mut pick_theme, mut pick_scheme) = (cur_theme, cur_scheme);
+    // Centred on first open and moveable by its title bar — an anchored
+    // window cannot be dragged, so place it with default_pos instead.
+    let screen = ctx
+        .input(|i| i.raw.screen_rect)
+        .unwrap_or_else(|| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0)));
+    let pos = screen.min + (screen.size() - egui::vec2(540.0, 500.0)) / 2.0;
     egui::Window::new("Appearance")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .default_width(540.0)
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .default_pos(pos)
+        .movable(true)
         .show(ctx, |ui| {
             let gap = 10.0;
             ui.label(appearance_heading("Colour scheme"));
@@ -802,12 +859,18 @@ fn create_theme_window(ctx: &egui::Context, app: &mut App) {
     enum Action { None, Save, Remove, Cancel, Export }
     let mut action = Action::None;
     let mut open = true;
+    // Centred on first open and moveable by its title bar.
+    let screen = ctx
+        .input(|i| i.raw.screen_rect)
+        .unwrap_or_else(|| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0)));
+    let pos = screen.min + (screen.size() - egui::vec2(440.0, 560.0)) / 2.0;
     egui::Window::new("Create theme")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .default_width(440.0)
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .default_pos(pos)
+        .movable(true)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.add_sized(egui::vec2(70.0, 20.0), egui::Label::new("Name"));
@@ -1069,12 +1132,19 @@ fn colour_picker_window(ctx: &egui::Context, app: &mut App) {
     enum Action { None, Ok, Cancel }
     let mut action = Action::None;
     let mut open = true;
+    // Opens beside the Create theme window (its old anchored offset) and is
+    // moveable by its title bar.
+    let screen = ctx
+        .input(|i| i.raw.screen_rect)
+        .unwrap_or_else(|| egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0)));
+    let pos = screen.center() + egui::vec2(320.0, -30.0) - egui::vec2(430.0, 300.0) / 2.0;
     egui::Window::new("Colour picker")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .default_width(430.0)
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(320.0, -30.0))
+        .default_pos(pos)
+        .movable(true)
         .show(ctx, |ui| {
             let mut changed = false;
             ui.horizontal(|ui| {
@@ -1183,7 +1253,37 @@ fn theme_file_window(ctx: &egui::Context, app: &mut App) {
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, |ui| {
             ui.label("File path");
-            ui.add(egui::TextEdit::singleline(&mut state.path).desired_width(420.0).hint_text("~/.config/tagrename/theme.json"));
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.path)
+                        .desired_width(340.0)
+                        .hint_text("~/.config/tagrename/theme.json"),
+                );
+                if ui
+                    .add_enabled(app.shot.is_none() && !app.dlg.native_pick.busy(), egui::Button::new("Browse..."))
+                    .clicked()
+                {
+                    let current = expand_tilde(&state.path);
+                    let dir = current
+                        .parent()
+                        .filter(|p| p.is_dir())
+                        .map(Path::to_path_buf)
+                        .unwrap_or_else(|| default_start_dir(app));
+                    let name = current
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or_else(|| "theme.json".to_string());
+                    let filters = native_filters(&[("Theme files", &["json"]), ("All files", &["*"])]);
+                    let request = match purpose {
+                        ThemeFilePurpose::Export => native_picker::Request::SaveFile { dir, name, filters },
+                        ThemeFilePurpose::Import => native_picker::Request::OpenFile { dir, filters },
+                    };
+                    if app.dlg.native_pick.request(request) {
+                        app.dlg.native_theme = true;
+                    }
+                }
+            });
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1256,6 +1356,7 @@ fn theme_file_window(ctx: &egui::Context, app: &mut App) {
 
 pub fn draw(ctx: &egui::Context, app: &mut App) {
     let results = app.dlg.take_results();
+    poll_native_picker(ctx, app);
 
     // --- Rename preview ---
     if app.dlg.show_rename_preview {
@@ -1306,7 +1407,7 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
     }
 
     // --- Mask editor ---
-    if let Some(which) = app.dlg.show_mask_editor {
+    if let Some(kind) = app.dlg.show_mask_editor {
         let mut open = true;
         let mut choice = None;
         egui::Window::new("Mask Editor")
@@ -1314,18 +1415,43 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
             .collapsible(false)
             .default_width(780.0)
             .show(ctx, |ui| {
-                choice = mask_editor(ui, app, which);
+                choice = mask_editor(ui, app, kind);
             });
         if choice == Some(false) || (choice.is_none() && !open) {
             let backup = app.dlg.mask_backup.clone();
-            if which == 0 {
-                app.rename_mask = backup;
-            } else {
-                app.f2t_mask = backup;
+            match kind {
+                MaskKind::Rename => app.rename_mask = backup,
+                MaskKind::FileToTag => app.f2t_mask = backup,
+                MaskKind::Folder => app.folder_mask = backup,
+            }
+        }
+        if choice == Some(true) {
+            match kind {
+                MaskKind::Folder => {
+                    let target = app
+                        .dlg
+                        .folder_rename_target
+                        .take()
+                        .or_else(|| app.folder_rename_target());
+                    let mask = app.folder_mask.clone();
+                    if let Some(target) = target {
+                        app.apply_folder_mask(&target, &mask);
+                    } else {
+                        app.warn("There is no folder to rename.");
+                    }
+                }
+                MaskKind::Rename if !app.dlg.file_rename_targets.is_empty() => {
+                    let targets = std::mem::take(&mut app.dlg.file_rename_targets);
+                    let mask = app.rename_mask.clone();
+                    app.apply_file_name_mask(&targets, &mask);
+                }
+                _ => {}
             }
         }
         if choice.is_some() || !open {
             app.dlg.show_mask_editor = None;
+            app.dlg.folder_rename_target = None;
+            app.dlg.file_rename_targets.clear();
         }
     }
 
@@ -1386,15 +1512,18 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
     // --- Export ---
     if app.dlg.show_export {
         let mut open = true;
-        egui::Window::new("Export/Import Tags")
+        egui::Window::new("Export Tags")
             .open(&mut open)
+            .collapsible(false)
+            .resizable([false, true])
+            .min_size(egui::vec2(480.0, 280.0))
             .default_width(520.0)
             .default_height(430.0)
             .show(ctx, |ui| {
                 ui.label("Select what fields to export:");
                 egui::ScrollArea::vertical()
                     .id_salt("export_fields")
-                    .max_height(200.0)
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
                         egui::Grid::new("export_grid").num_columns(3).show(ui, |ui| {
                             for slot in app.dlg.export_fields.iter_mut() {
@@ -1565,47 +1694,6 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
         app.dlg.show_options &= open;
     }
 
-    // --- Genre list editor ---
-    if app.dlg.show_genre_editor {
-        let mut open = true;
-        egui::Window::new("Genre List Editor")
-            .open(&mut open)
-            .default_width(340.0)
-            .default_height(380.0)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Add genre:");
-                    ui.text_edit_singleline(&mut app.dlg.new_genre);
-                    if ui.button("Add").clicked() && !app.dlg.new_genre.is_empty() {
-                        let g = app.dlg.new_genre.clone();
-                        if !app.genres.iter().any(|x| x == &g) {
-                            app.genres.push(g);
-                            app.genres.sort();
-                        }
-                        app.dlg.new_genre.clear();
-                    }
-                });
-                ui.separator();
-                let mut remove: Option<String> = None;
-                egui::ScrollArea::vertical()
-                    .id_salt("genres")
-                    .show(ui, |ui| {
-                        for g in app.genres.clone() {
-                            ui.horizontal(|ui| {
-                                ui.label(&g);
-                                if ui.small_button("Remove").clicked() {
-                                    remove = Some(g);
-                                }
-                            });
-                        }
-                    });
-                if let Some(g) = remove {
-                    app.genres.retain(|x| x != &g);
-                }
-            });
-        app.dlg.show_genre_editor &= open;
-    }
-
     // --- About ---
     if app.dlg.show_about {
         let mut open = true;
@@ -1615,7 +1703,7 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Tag:Rename 1.1.3").strong().size(22.0));
+                    ui.label(RichText::new("Tag:Rename 1.1.4").strong().size(22.0));
                     ui.label(
                         RichText::new("Music tag editor — modern dark edition").color(c_text_dim()),
                     );
@@ -1685,6 +1773,39 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
         }
     }
 
+    // --- Delete confirmation ---
+    if let Some(indices) = app.dlg.confirm_delete.clone() {
+        let mut open = true;
+        egui::Window::new("Delete Files")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(420.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "Permanently delete {} selected file{}? This cannot be undone.",
+                    indices.len(),
+                    if indices.len() == 1 { "" } else { "s" }
+                ));
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("No").clicked() {
+                            app.dlg.confirm_delete = None;
+                        }
+                        if primary_button(ui, "Yes").clicked() {
+                            app.delete_files(&indices);
+                            app.dlg.confirm_delete = None;
+                        }
+                    });
+                });
+            });
+        if !open {
+            app.dlg.confirm_delete = None;
+        }
+    }
+
     // --- Advanced... (swap any two fields) ---
     if app.dlg.swap_advanced {
         let mut open = true;
@@ -1737,12 +1858,22 @@ pub fn draw(ctx: &egui::Context, app: &mut App) {
     if let Some(mut state) = app.dlg.choose.take() {
         let purpose = state.purpose.clone();
         let mut done: Option<ChooseDone> = None;
-        egui::Window::new(purpose.title())
-            .default_width(460.0)
-            .default_height(400.0)
-            .show(ctx, |ui| {
-                chooser_body(ui, app, &mut state, &mut done);
-            });
+        // Screenshot runs use the old in-app chooser so the pictures stay
+        // deterministic and no real OS dialog appears over the window.
+        // Everywhere else the desktop's own folder/file dialog is used.
+        let use_native = app.shot.is_none();
+        if use_native && !app.dlg.native_pick.busy() {
+            let _ = app.dlg.native_pick.request(native_request_for(&state, app));
+        }
+        let native_pending = use_native && app.dlg.native_pick.busy();
+        if !native_pending {
+            egui::Window::new(purpose.title())
+                .default_width(460.0)
+                .default_height(400.0)
+                .show(ctx, |ui| {
+                    chooser_body(ui, app, &mut state, &mut done);
+                });
+        }
         match done {
             Some(d) => {
                 handle_choose(app, purpose, d);
@@ -1822,6 +1953,141 @@ fn handle_choose(app: &mut App, purpose: ChoosePurpose, done: ChooseDone) {
         }
         _ => {}
     }
+}
+
+/// Build the OS picker request from the same state the in-app chooser uses.
+/// Keeping this beside `chooser_body` means both routes choose the same
+/// starting folder, default name and file types.
+fn native_request_for(state: &ChooseState, app: &App) -> native_picker::Request {
+    use native_picker::Request;
+
+    let dir = state.dir.clone();
+    match &state.purpose {
+        ChoosePurpose::OpenFolder | ChoosePurpose::AddRoot => Request::Folder { dir },
+        ChoosePurpose::PickCover => Request::OpenFile {
+            dir,
+            filters: native_filters(&[
+                ("Images", &["jpg", "jpeg", "png", "gif", "bmp", "webp"]),
+                ("All files", &["*"]),
+            ]),
+        },
+        ChoosePurpose::LoadLyrics => Request::OpenFile {
+            dir,
+            filters: native_filters(&[("Text files", &["txt", "lrc"]), ("All files", &["*"])]),
+        },
+        ChoosePurpose::SavePlaylist(_) => Request::SaveFile {
+            dir,
+            name: with_default_extension(&state.name, "m3u"),
+            filters: native_filters(&[("Playlist", &["m3u"])]),
+        },
+        ChoosePurpose::SaveExport => {
+            let ext = app.dlg.export_format.ext();
+            Request::SaveFile {
+                dir,
+                name: with_default_extension(&state.name, ext),
+                filters: native_filters(&[(
+                    match app.dlg.export_format {
+                        ExportFormat::Csv => "CSV files",
+                        ExportFormat::Txt => "Text files",
+                        ExportFormat::Html => "HTML files",
+                        ExportFormat::Xml => "XML files",
+                    },
+                    &[ext],
+                )]),
+            }
+        }
+        ChoosePurpose::SaveCover => Request::SaveFile {
+            dir,
+            name: with_default_extension(&state.name, "jpg"),
+            filters: native_filters(&[
+                ("Images", &["jpg", "jpeg", "png", "gif", "bmp"]),
+                ("All files", &["*"]),
+            ]),
+        },
+        ChoosePurpose::SaveLyrics => Request::SaveFile {
+            dir,
+            name: with_default_extension(&state.name, "txt"),
+            filters: native_filters(&[("Text files", &["txt"]), ("All files", &["*"])]),
+        },
+    }
+}
+
+fn native_filters(entries: &[(&str, &[&str])]) -> native_picker::Filters {
+    entries
+        .iter()
+        .map(|(name, exts)| {
+            (
+                (*name).to_string(),
+                exts.iter().map(|e| (*e).to_string()).collect(),
+            )
+        })
+        .collect()
+}
+
+fn with_default_extension(name: &str, ext: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        format!("untitled.{ext}")
+    } else if PathBuf::from(name).extension().is_none() {
+        format!("{name}.{ext}")
+    } else {
+        name.to_string()
+    }
+}
+
+fn finalize_saved_path(purpose: &ChoosePurpose, fmt: ExportFormat, mut path: PathBuf) -> PathBuf {
+    let ext = match purpose {
+        ChoosePurpose::SavePlaylist(_) => "m3u",
+        ChoosePurpose::SaveExport => fmt.ext(),
+        ChoosePurpose::SaveCover => "jpg",
+        ChoosePurpose::SaveLyrics => "txt",
+        _ => return path,
+    };
+    if path.extension().is_none() {
+        path.set_extension(ext);
+    }
+    path
+}
+
+/// Turn the OS dialog's result into the existing `ChooseDone` dispatch so
+/// no save/load code has to know which picker produced the path.
+fn native_choose_done(app: &mut App, purpose: ChoosePurpose, path: PathBuf) {
+    let done = match &purpose {
+        ChoosePurpose::OpenFolder | ChoosePurpose::AddRoot => ChooseDone::Folder(path),
+        ChoosePurpose::PickCover | ChoosePurpose::LoadLyrics => match std::fs::read(&path) {
+            Ok(bytes) => ChooseDone::Bytes(bytes),
+            Err(err) => {
+                app.warn(format!("Couldn't read \"{}\": {err}", path.display()));
+                return;
+            }
+        },
+        _ => ChooseDone::SavePath(finalize_saved_path(&purpose, app.dlg.export_format, path)),
+    };
+    handle_choose(app, purpose, done);
+}
+
+/// Poll the one in-flight native dialog, if any, and deliver its result.
+fn poll_native_picker(ctx: &egui::Context, app: &mut App) {
+    let Some(result) = app.dlg.native_pick.poll() else { return };
+    ctx.request_repaint();
+
+    if app.dlg.native_theme {
+        app.dlg.native_theme = false;
+        if let (Some(path), Some(state)) = (result, app.dlg.theme_file.as_mut()) {
+            state.path = path.to_string_lossy().into_owned();
+        }
+        return;
+    }
+
+    match result {
+        Some(path) => {
+            if let Some(state) = app.dlg.choose.take() {
+                native_choose_done(app, state.purpose, path);
+            }
+        }
+        None => app.dlg.choose = None,
+    }
+    app.dlg.pick_cover = false;
 }
 
 fn chooser_body(ui: &mut Ui, app: &mut App, state: &mut ChooseState, done: &mut Option<ChooseDone>) {
@@ -2149,10 +2415,12 @@ fn preview_table(ui: &mut Ui, rows: &[(String, String)], left: &str, right: &str
     });
 }
 
-/// The variables the Mask Editor can insert, with the rename or the
-/// file-name-to-tag token set.
-fn mask_variables(which: usize) -> Vec<(&'static str, &'static str)> {
-    if which == 0 {
+/// The variables the Mask Editor can insert. Folders can be named from
+/// the music inside them, so the folder mode uses the same tokens as file
+/// rename, but it never inserts backslashes/folder structure.
+fn mask_variables(kind: MaskKind) -> Vec<(&'static str, &'static str)> {
+    match kind {
+        MaskKind::Rename | MaskKind::Folder => {
         vec![
             ("Artist (%1)", "%1"),
             ("Title (%2)", "%2"),
@@ -2181,8 +2449,8 @@ fn mask_variables(which: usize) -> Vec<(&'static str, &'static str)> {
             ("Encoder (%enc)", "%enc"),
             ("Random (%rnd)", "%rnd"),
         ]
-    } else {
-        vec![
+        }
+        MaskKind::FileToTag => vec![
             ("Artist (%1)", "%1"),
             ("Title (%2)", "%2"),
             ("Album (%3)", "%3"),
@@ -2196,7 +2464,7 @@ fn mask_variables(which: usize) -> Vec<(&'static str, &'static str)> {
             ("Conductor (%co)", "%co"),
             ("Composer (%cp)", "%cp"),
             ("Skip part (%d)", "%d"),
-        ]
+        ],
     }
 }
 
@@ -2229,11 +2497,11 @@ fn insert_at_cursor(ctx: &egui::Context, id: egui::Id, text: &mut String, insert
 /// The Mask Editor: the mask box, the variables to insert, saved masks,
 /// the result example and OK / Cancel. Returns Some(true) for OK,
 /// Some(false) for Cancel, and None while it stays open.
-fn mask_editor(ui: &mut Ui, app: &mut App, which: usize) -> Option<bool> {
-    let mut mask_text = if which == 0 {
-        app.rename_mask.clone()
-    } else {
-        app.f2t_mask.clone()
+fn mask_editor(ui: &mut Ui, app: &mut App, kind: MaskKind) -> Option<bool> {
+    let mut mask_text = match kind {
+        MaskKind::Rename => app.rename_mask.clone(),
+        MaskKind::FileToTag => app.f2t_mask.clone(),
+        MaskKind::Folder => app.folder_mask.clone(),
     };
     let mut result = None;
     let mut insert: Option<&'static str> = None;
@@ -2241,11 +2509,16 @@ fn mask_editor(ui: &mut Ui, app: &mut App, which: usize) -> Option<bool> {
     let mut remove_selected = false;
     let mut pick: Option<usize> = None;
     let mut insert_folder = false;
-    let variables = mask_variables(which);
+    let variables = mask_variables(kind);
 
-    let edit_id = egui::Id::new(("mask_editor_text", which));
+    let edit_id = egui::Id::new(("mask_editor_text", kind.id()));
+    let mask_label = if kind == MaskKind::Folder {
+        "Folder name mask:"
+    } else {
+        "File name mask:"
+    };
     ui.horizontal(|ui| {
-        ui.label(RichText::new("File name mask:").color(c_text()).strong());
+        ui.label(RichText::new(mask_label).color(c_text()).strong());
         ui.add(
             egui::TextEdit::singleline(&mut mask_text)
                 .id(edit_id)
@@ -2313,16 +2586,18 @@ fn mask_editor(ui: &mut Ui, app: &mut App, which: usize) -> Option<bool> {
             });
         });
     });
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        if ui.button("Insert Folder into Mask").clicked() {
-            insert_folder = true;
-        }
-        ui.label(
-            RichText::new("A \\ makes a folder, e.g. %1\\%2 puts each file in an artist folder.")
-                .color(c_text_dim()),
-        );
-    });
+    if kind != MaskKind::Folder {
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button("Insert Folder into Mask").clicked() {
+                insert_folder = true;
+            }
+            ui.label(
+                RichText::new("A \\ makes a folder, e.g. %1\\%2 puts each file in an artist folder.")
+                    .color(c_text_dim()),
+            );
+        });
+    }
 
     if let Some(tok) = insert {
         insert_at_cursor(ui.ctx(), edit_id, &mut mask_text, tok);
@@ -2348,20 +2623,20 @@ fn mask_editor(ui: &mut Ui, app: &mut App, which: usize) -> Option<bool> {
         }
     }
 
-    if which == 0 {
-        app.rename_mask = mask_text.clone();
-    } else {
-        app.f2t_mask = mask_text.clone();
+    match kind {
+        MaskKind::Rename => app.rename_mask = mask_text.clone(),
+        MaskKind::FileToTag => app.f2t_mask = mask_text.clone(),
+        MaskKind::Folder => app.folder_mask = mask_text.clone(),
     }
 
     ui.add_space(6.0);
     ui.separator();
     ui.horizontal(|ui| {
         ui.label(RichText::new("Result example:").color(c_text_dim()).strong());
-        let example = if which == 0 {
-            crate::ui_tabs::rename_example(app, &mask_text)
-        } else {
-            crate::ui_tabs::f2t_example(app, &mask_text)
+        let example = match kind {
+            MaskKind::Rename => crate::ui_tabs::rename_example(app, &mask_text),
+            MaskKind::FileToTag => crate::ui_tabs::f2t_example(app, &mask_text),
+            MaskKind::Folder => crate::ui_tabs::folder_example(app, &mask_text),
         };
         ui.label(RichText::new(example).color(c_ok()).size(15.0));
     });

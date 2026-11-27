@@ -222,24 +222,30 @@ fn save_roots(roots: &[PathBuf]) {
 }
 
 /// The two file name masks and the saved masks, kept between runs in
-/// masks.txt: one "rename", one "f2t" and one "saved" line per mask.
+/// masks.txt: one line per mask kind plus one "saved" line per saved
+/// mask. `folder` is newer; older files simply don't have it.
 /// The mask both file-name tools start with. The original used two
 /// different defaults; the person asked for this single one instead.
 const DEFAULT_FILE_MASK: &str = "%6 - %1 - %2";
 const LEGACY_RENAME_MASK: &str = "%1 - %2";
 const LEGACY_F2T_MASK: &str = "%1-%2";
+/// Folder names rarely want the track number; artist is the safest default.
+const DEFAULT_FOLDER_MASK: &str = "%1";
 
-pub fn load_masks() -> Option<(String, String, Vec<String>)> {
+pub fn load_masks() -> Option<(String, String, String, Vec<String>)> {
     let file = config_file("masks.txt")?;
     let text = std::fs::read_to_string(file).ok()?;
     let mut rename = None;
     let mut f2t = None;
+    let mut folder = None;
     let mut saved: Vec<String> = Vec::new();
     for line in text.lines() {
         if let Some(v) = line.strip_prefix("rename ") {
             rename = Some(v.to_string());
         } else if let Some(v) = line.strip_prefix("f2t ") {
             f2t = Some(v.to_string());
+        } else if let Some(v) = line.strip_prefix("folder ") {
+            folder = Some(v.to_string());
         } else if let Some(v) = line.strip_prefix("saved ") {
             let v = v.trim().to_string();
             if !v.is_empty() && !saved.contains(&v) {
@@ -251,19 +257,21 @@ pub fn load_masks() -> Option<(String, String, Vec<String>)> {
     // new default too, while any genuinely custom mask is left alone.
     let rename = rename.filter(|m| m != LEGACY_RENAME_MASK && m != LEGACY_F2T_MASK);
     let f2t = f2t.filter(|m| m != LEGACY_RENAME_MASK && m != LEGACY_F2T_MASK);
+    let folder = folder.filter(|m| !m.trim().is_empty());
     Some((
         rename.unwrap_or_else(|| DEFAULT_FILE_MASK.into()),
         f2t.unwrap_or_else(|| DEFAULT_FILE_MASK.into()),
+        folder.unwrap_or_else(|| DEFAULT_FOLDER_MASK.into()),
         saved,
     ))
 }
 
-fn save_masks(rename: &str, f2t: &str, saved: &[String]) {
+fn save_masks(rename: &str, f2t: &str, folder: &str, saved: &[String]) {
     let Some(file) = config_file("masks.txt") else { return };
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let mut body = format!("rename {rename}\nf2t {f2t}\n");
+    let mut body = format!("rename {rename}\nf2t {f2t}\nfolder {folder}\n");
     for s in saved {
         body.push_str(&format!("saved {s}\n"));
     }
@@ -343,6 +351,45 @@ fn scan_folder_rows(path: &Path, include_subfolders: bool) -> Vec<MusicFile> {
     rows
 }
 
+/// Flat File Search: every music file below `path`, in one list, with no
+/// folder rows. This is the original's "Flat File List" view, restored
+/// under the name the person asked for.
+fn scan_flat_rows(path: &Path) -> Vec<MusicFile> {
+    walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file() && data::is_audio_file(e.path()))
+        .filter(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| !n.starts_with('.'))
+                .unwrap_or(false)
+        })
+        .filter_map(|e| data::read_file(e.path()))
+        .collect()
+}
+
+/// One level of rows below a folder, in display order: folder rows plus
+/// audio files. Shared by row expansion, full expansion and row rebuild.
+fn read_child_rows(path: &Path) -> Vec<MusicFile> {
+    let mut rows = Vec::new();
+    let Ok(rd) = std::fs::read_dir(path) else { return rows };
+    let mut entries: Vec<_> = rd.flatten().collect();
+    entries.sort_by_key(|e| e.file_name().to_string_lossy().to_lowercase());
+    for e in entries {
+        let p = e.path();
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n.starts_with('.') { continue; }
+        if p.is_dir() {
+            if let Some(m) = data::read_folder_row(&p) { rows.push(m); }
+        } else if data::is_audio_file(&p) {
+            if let Some(m) = data::read_file(&p) { rows.push(m); }
+        }
+    }
+    rows
+}
+
 pub struct App {
     pub files: Vec<MusicFile>,
     pub checked: Vec<bool>,
@@ -350,6 +397,9 @@ pub struct App {
     pub selection_anchor: Option<usize>,
     pub folder: Option<PathBuf>,
     pub search_subfolders: bool,
+    /// Flatten the recursive search into one list of music files, with no
+    /// folder rows. Only meaningful while `search_subfolders` is on.
+    pub flat_file_search: bool,
     pub view_mode: ViewMode,
     pub filter_field: usize,
     pub filter_text: String,
@@ -386,6 +436,10 @@ pub struct App {
     pub f2t_case_enabled: bool,
     pub f2t_case: usize,
     pub replace_underscores: bool,
+
+    /// The mask used by File / Edit File Name (F6) and File / Rename Folder
+    /// (F7). It is kept across restarts, like the other masks.
+    pub folder_mask: String,
 
     // Clipboard
     pub clip_tag: Option<TagFields>,
@@ -440,7 +494,6 @@ pub struct App {
 
     // Dialogs
     pub dlg: ui_dialogs::Dialogs,
-    pub genres: Vec<String>,
 
     /// The folder scan running in the background, if any.
     pub loading: Option<Loading>,
@@ -516,19 +569,18 @@ impl App {
     }
 
     pub fn new() -> Self {
-        let (rename_mask, f2t_mask, saved_masks) =
-            load_masks().unwrap_or_else(|| (DEFAULT_FILE_MASK.into(), DEFAULT_FILE_MASK.into(), Vec::new()));
+        let (rename_mask, f2t_mask, folder_mask, saved_masks) = load_masks().unwrap_or_else(|| {
+            (
+                DEFAULT_FILE_MASK.into(),
+                DEFAULT_FILE_MASK.into(),
+                DEFAULT_FOLDER_MASK.into(),
+                Vec::new(),
+            )
+        });
         let mut dlg = ui_dialogs::Dialogs::default();
         dlg.saved_masks = saved_masks;
         let files: Vec<MusicFile> = Vec::new();
         let checked = vec![false; files.len()];
-        let mut genres: Vec<String> = crate::genres::GENRES.iter().map(|s| s.to_string()).collect();
-        for f in &files {
-            if !f.fields.genre.is_empty() && !genres.iter().any(|g| g == &f.fields.genre) {
-                genres.push(f.fields.genre.clone());
-            }
-        }
-        genres.sort();
         App {
             files,
             checked,
@@ -536,6 +588,7 @@ impl App {
             selection_anchor: None,
             folder: None,
             search_subfolders: false,
+            flat_file_search: false,
             view_mode: ViewMode::All,
             filter_field: 0,
             filter_text: String::new(),
@@ -576,6 +629,7 @@ impl App {
             f2t_case_enabled: false,
             f2t_case: 0,
             replace_underscores: true,
+            folder_mask,
             clip_tag: None,
             expanded: HashMap::new(),
             folder_children: HashMap::new(),
@@ -595,7 +649,6 @@ impl App {
             dont_add_leading_zero_track: false,
             update_id3v1_if_exists: true,
             dlg,
-            genres,
             loading: None,
             textures: HashMap::new(),
             shot: None,
@@ -605,13 +658,19 @@ impl App {
     /// Write the masks to masks.txt whenever they differ from the last write.
     pub fn persist_masks(&mut self) {
         let key = format!(
-            "{}\n{}\n{}",
+            "{}\n{}\n{}\n{}",
             self.rename_mask,
             self.f2t_mask,
+            self.folder_mask,
             self.dlg.saved_masks.join("\n")
         );
         if key != self.dlg.masks_saved {
-            save_masks(&self.rename_mask, &self.f2t_mask, &self.dlg.saved_masks);
+            save_masks(
+                &self.rename_mask,
+                &self.f2t_mask,
+                &self.folder_mask,
+                &self.dlg.saved_masks,
+            );
             self.dlg.masks_saved = key;
         }
     }
@@ -791,21 +850,7 @@ impl App {
             self.rebuild_rows_from_folder();
             return;
         }
-        let mut children: Vec<MusicFile> = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(&path) {
-            let mut entries: Vec<_> = rd.flatten().collect();
-            entries.sort_by_key(|e| e.file_name().to_string_lossy().to_lowercase());
-            for e in entries {
-                let p = e.path();
-                let n = e.file_name().to_string_lossy().into_owned();
-                if n.starts_with('.') { continue; }
-                if p.is_dir() {
-                    if let Some(m) = data::read_folder_row(&p) { children.push(m); }
-                } else if data::is_audio_file(&p) {
-                    if let Some(m) = data::read_file(&p) { children.push(m); }
-                }
-            }
-        }
+        let children = read_child_rows(&path);
         self.expanded_rows.insert(path, children);
         self.rebuild_rows_from_folder();
     }
@@ -822,21 +867,12 @@ impl App {
             }
         }
         let mut rows = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(&folder) {
-            let mut entries: Vec<_> = rd.flatten().collect();
-            entries.sort_by_key(|e| e.file_name().to_string_lossy().to_lowercase());
-            for e in entries {
-                let p = e.path();
-                let n = e.file_name().to_string_lossy().into_owned();
-                if n.starts_with('.') { continue; }
-                if p.is_dir() {
-                    if let Some(m) = data::read_folder_row(&p) {
-                        rows.push(m);
-                        if self_expanded(&self.expanded_rows, &p) { collect(&p, &self.expanded_rows, &mut rows); }
-                    }
-                } else if data::is_audio_file(&p) {
-                    if let Some(m) = data::read_file(&p) { rows.push(m); }
-                }
+        for row in read_child_rows(&folder) {
+            let p = row.path.clone();
+            let is_dir = row.is_dir;
+            rows.push(row);
+            if is_dir && self_expanded(&self.expanded_rows, &p) {
+                collect(&p, &self.expanded_rows, &mut rows);
             }
         }
         let old_paths: Vec<PathBuf> = self.files.iter().map(|f| f.path.clone()).collect();
@@ -847,6 +883,37 @@ impl App {
         self.focused = focused_path.and_then(|p| self.files.iter().position(|f| f.path == p)).or(if self.files.is_empty(){None}else{Some(0)});
         self.selection_anchor = self.focused;
         fn self_expanded(map: &HashMap<PathBuf, Vec<MusicFile>>, p: &Path) -> bool { map.contains_key(p) }
+    }
+
+    /// Populate the main list's expansion cache for every folder below the
+    /// current folder, then rebuild the rows once. The left folder tree has
+    /// its own state and is intentionally untouched.
+    pub fn expand_all_rows(&mut self) {
+        let Some(root) = self.folder.clone() else { return };
+        fn walk(path: &Path, map: &mut HashMap<PathBuf, Vec<MusicFile>>, depth: usize) {
+            if depth > 64 { return; }
+            let children = read_child_rows(path);
+            let dirs: Vec<PathBuf> = children
+                .iter()
+                .filter(|c| c.is_dir)
+                .map(|c| c.path.clone())
+                .collect();
+            map.insert(path.to_path_buf(), children);
+            for dir in dirs {
+                walk(&dir, map, depth + 1);
+            }
+        }
+        let mut map = HashMap::new();
+        walk(&root, &mut map, 0);
+        self.expanded_rows = map;
+        self.rebuild_rows_from_folder();
+        self.say("All folders expanded.");
+    }
+
+    pub fn collapse_all_rows(&mut self) {
+        self.expanded_rows.clear();
+        self.rebuild_rows_from_folder();
+        self.say("All folders collapsed.");
     }
 
     /// Add a folder as a root of the folder tree only. This deliberately
@@ -934,10 +1001,16 @@ impl App {
         // The tick box is captured now so a later click cannot change
         // the rules halfway through a background scan.
         let include_subfolders = self.search_subfolders;
+        let flat = self.flat_file_search;
         let (tx, rx) = std::sync::mpsc::channel();
         let scan_path = path.to_path_buf();
         std::thread::spawn(move || {
-            let _ = tx.send(LoadEvent::Done(scan_folder_rows(&scan_path, include_subfolders)));
+            let rows = if include_subfolders && flat {
+                scan_flat_rows(&scan_path)
+            } else {
+                scan_folder_rows(&scan_path, include_subfolders)
+            };
+            let _ = tx.send(LoadEvent::Done(rows));
         });
         self.files.clear();
         self.checked.clear();
@@ -949,7 +1022,7 @@ impl App {
         self.address = path.display().to_string();
         self.undo_stack.clear();
         self.expanded_rows.clear();
-        self.loading = Some(Loading { folder: path.to_path_buf(), sub: false, seen: 0, rx });
+        self.loading = Some(Loading { folder: path.to_path_buf(), sub: include_subfolders, seen: 0, rx });
         self.say(format!("Reading {}...", path.display()));
     }
 
@@ -1003,16 +1076,6 @@ impl App {
         self.folder = Some(folder.clone());
         self.address = folder.display().to_string();
         self.undo_stack.clear();
-        // The genre dropdown grows with the library (the original's
-        // genre list is user-editable: Config StandardGenresList /
-        // AdditionalGenresList).
-        for f in &self.files {
-            let g = f.fields.genre.trim().to_string();
-            if !g.is_empty() && !self.genres.iter().any(|x| x.eq_ignore_ascii_case(&g)) {
-                self.genres.push(g);
-            }
-        }
-        self.genres.sort();
         if self.files.is_empty() {
             if sub {
                 self.warn(format!("No subfolders or music files in {}", folder.display()));
@@ -1932,21 +1995,385 @@ impl App {
         }
     }
 
-    /// Delete the checked files (with a confirmation, like the original).
+    /// Ask before deleting the checked files. Both the File menu and the
+    /// Delete key come through here so they behave identically.
+    pub fn ask_delete_selected(&mut self) {
+        let indices = self.checked_indices();
+        if indices.is_empty() {
+            self.warn("Nothing to delete — check files first.");
+        } else {
+            self.dlg.confirm_delete = Some(indices);
+        }
+    }
+
+    /// The folder F6/F7 acts on: a selected/focused folder row wins, then
+    /// the folder currently open in the file list.
+    pub fn folder_rename_target(&self) -> Option<PathBuf> {
+        let from_checked = self.checked_indices().into_iter().find_map(|i| {
+            let f = self.files.get(i)?;
+            f.is_dir.then(|| f.path.clone())
+        });
+        from_checked.or_else(|| {
+            self.focused.and_then(|i| {
+                let f = self.files.get(i)?;
+                f.is_dir.then(|| f.path.clone())
+            })
+        }).or_else(|| self.folder.clone())
+    }
+
+    /// Open the Mask Editor for folder renaming. The chosen mask is kept
+    /// across restarts and applied to the folder when the editor is accepted.
+    pub fn open_folder_mask_editor(&mut self) {
+        let Some(target) = self.folder_rename_target() else {
+            self.warn("There is no folder to rename. Open a folder or select a folder row first.");
+            return;
+        };
+        let current = self.folder_mask.clone();
+        self.dlg.open_folder_mask_editor(&current, target);
+    }
+
+    /// Open the Mask Editor for renaming selected track(s). The chosen mask
+    /// is kept across restarts and applied to the selected file(s) on OK.
+    pub fn open_file_name_mask_editor(&mut self) {
+        let mut targets = self.selected_file_indices();
+        if targets.is_empty() {
+            if let Some(i) = self.focused {
+                if self.files.get(i).is_some_and(|f| !f.is_dir) {
+                    targets.push(i);
+                }
+            }
+        }
+        if targets.is_empty() {
+            self.warn("There is no file selected. Select one or more tracks first.");
+            return;
+        }
+        let current = self.rename_mask.clone();
+        self.dlg.open_file_name_mask_editor(&current, targets);
+    }
+
+    /// Delete the checked files after confirmation.
     pub fn delete_files(&mut self, indices: &[usize]) {
         let mut done = 0;
         let mut keep = Vec::new();
+        let mut keep_checked = Vec::new();
         for (i, f) in self.files.iter().enumerate() {
-            if indices.contains(&i) && std::fs::remove_file(&f.path).is_ok() {
-                done += 1;
-                continue;
+            if indices.contains(&i) {
+                if std::fs::remove_file(&f.path).is_ok() {
+                    done += 1;
+                } else {
+                    keep.push(f.clone());
+                    keep_checked.push(self.checked[i]);
+                }
+            } else {
+                keep.push(f.clone());
+                keep_checked.push(self.checked[i]);
             }
-            keep.push(f.clone());
         }
         self.files = keep;
-        self.checked = vec![false; self.files.len()];
-        self.focused = None;
+        self.checked = keep_checked;
+        self.focused = if self.files.is_empty() { None } else { Some(0) };
+        self.selection_anchor = self.focused;
         self.say(format!("Deleted {done} file(s)."));
+    }
+
+    /// Rename selected files using the rename mask. This is the F6 "Edit
+    /// File Name" action: the Mask Editor picks the mask, then OK applies it.
+    pub fn apply_file_name_mask(&mut self, indices: &[usize], mask_text: &str) {
+        if !mask::mask_has_variables(mask_text) {
+            self.warn("First fill in the \"File name mask\"!");
+            return;
+        }
+        let mut targets: Vec<usize> = indices
+            .iter()
+            .copied()
+            .filter(|i| self.files.get(*i).is_some_and(|f| !f.is_dir))
+            .collect();
+        targets.sort_unstable();
+        targets.dedup();
+        if targets.is_empty() {
+            self.warn("Nothing to do!\nSelect (check) the files first.");
+            return;
+        }
+
+        let opts = mask::RenameOptions {
+            case: mask::Case::from_index(self.rename_case),
+            case_enabled: self.rename_case_enabled,
+            replace_spaces_with_underscores: self.replace_spaces,
+            remove_leading_zero_in_disc: self.remove_leading_zero_disc,
+        };
+        let total = targets.len() as u32;
+        let mut batch = UndoBatch { pairs: Vec::new() };
+        let mut errors: Vec<String> = Vec::new();
+        let mut done = 0usize;
+
+        for (n, i) in targets.iter().enumerate() {
+            let f = &self.files[*i];
+            let Some(stem) = mask::build_new_name(f, mask_text, n as u32 + 1, total, &opts) else {
+                errors.push(format!("Error in file or file does not contain tag:\r\n{}", f.name));
+                continue;
+            };
+            if stem.trim().is_empty() {
+                continue;
+            }
+            let case_ext = |e: &str| {
+                if opts.case_enabled && opts.case == mask::Case::Upper {
+                    e.to_uppercase()
+                } else {
+                    e.to_lowercase()
+                }
+            };
+            let rel = stem.replace('/', "\\");
+            let old_path = f.path.clone();
+            let ext = case_ext(&f.extension());
+            let parent = old_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+            let mut new_path = if ext.is_empty() {
+                parent.join(&rel)
+            } else {
+                parent.join(format!("{rel}.{ext}"))
+            };
+            if let Some(dir) = new_path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if new_path.exists() && new_path != old_path {
+                let mut n = 1u32;
+                loop {
+                    let candidate = if ext.is_empty() {
+                        parent.join(format!("{rel} ({n})"))
+                    } else {
+                        parent.join(format!("{rel} ({n}).{ext}"))
+                    };
+                    if !candidate.exists() || candidate == old_path {
+                        new_path = candidate;
+                        break;
+                    }
+                    n += 1;
+                }
+            }
+            if let Ok(meta) = std::fs::metadata(&old_path) {
+                let mut perms = meta.permissions();
+                if perms.readonly() {
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    {
+                        perms.set_readonly(false);
+                        let _ = std::fs::set_permissions(&old_path, perms);
+                    }
+                }
+            }
+            match std::fs::rename(&old_path, &new_path) {
+                Ok(()) => {
+                    batch.pairs.push((new_path.clone(), old_path.clone()));
+                    if let (Some(old_stem), Some(new_stem)) =
+                        (old_path.file_stem(), new_path.file_stem())
+                    {
+                        let old_cdg = old_path.with_file_name(format!("{}.cdg", old_stem.to_string_lossy()));
+                        if old_cdg.exists() {
+                            let new_cdg = new_path.with_file_name(format!("{}.cdg", new_stem.to_string_lossy()));
+                            if new_cdg != old_cdg {
+                                let _ = std::fs::rename(&old_cdg, &new_cdg);
+                            }
+                        }
+                    }
+                    self.files[*i].path = new_path.clone();
+                    self.files[*i].name = new_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    done += 1;
+                }
+                Err(e) => errors.push(format!(
+                    "Can't rename file or folder {}.\r\nError message: {}",
+                    f.name, e
+                )),
+            }
+        }
+
+        if done > 0 {
+            self.undo_stack.push(batch);
+            self.say(format!("Renamed {done} file(s)."));
+        } else if errors.is_empty() {
+            self.warn("Nothing to do!");
+        }
+        if !errors.is_empty() {
+            let shown: Vec<String> = errors.iter().take(3).cloned().collect();
+            let more = errors.len().saturating_sub(shown.len());
+            let mut msg = shown.join("\n");
+            if more > 0 {
+                msg.push_str(&format!("\n...and {more} more"));
+            }
+            self.warn(msg);
+        }
+    }
+
+    /// Rename a folder using the folder mask. Only the folder name is
+    /// changed; the mask is never allowed to create a subpath.
+    pub fn apply_folder_mask(&mut self, target: &Path, mask_text: &str) {
+        let Some(row) = data::read_folder_row(target) else {
+            self.warn(format!("Could not read folder \"{}\".", target.display()));
+            return;
+        };
+        let opts = mask::RenameOptions {
+            case: mask::Case::from_index(self.rename_case),
+            case_enabled: self.rename_case_enabled,
+            replace_spaces_with_underscores: self.replace_spaces,
+            remove_leading_zero_in_disc: self.remove_leading_zero_disc,
+        };
+        let Some(stem) = mask::build_new_name(&row, mask_text, 1, 1, &opts) else {
+            self.warn("The folder mask did not produce a name for this folder.");
+            return;
+        };
+        // A folder name must stay a single path component.
+        let component = Path::new(&stem)
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let component = component
+            .trim()
+            .trim_end_matches(|c| c == '.' || c == ' ')
+            .to_string();
+        if component.is_empty() || component == "." || component == ".." {
+            self.warn("The folder mask produced an empty or invalid folder name.");
+            return;
+        }
+        if component.contains('/') || component.contains('\\') {
+            self.warn("The folder mask must produce a single folder name, not a path.");
+            return;
+        }
+
+        let Some(parent) = target.parent() else {
+            self.warn("That folder cannot be renamed.");
+            return;
+        };
+        let new_path = parent.join(&component);
+        if new_path == target {
+            self.say("The folder name already matches the mask.");
+            return;
+        }
+        if new_path.exists() {
+            self.warn(format!(
+                "Can't rename \"{}\" to \"{}\": a file or folder with that name already exists.",
+                target.display(),
+                new_path.display()
+            ));
+            return;
+        }
+
+        if let Err(err) = std::fs::rename(target, &new_path) {
+            self.warn(format!("Can't rename folder: {err}"));
+            return;
+        }
+
+        // Keep the UI pointed at the renamed folder, including the case
+        // where the folder currently open or a selected root was renamed.
+        let renamed_open = self.folder.as_deref() == Some(target);
+        if self.folder.as_ref().is_some_and(|p| p.starts_with(target)) {
+            if let Ok(tail) = self.folder.as_ref().unwrap().strip_prefix(target) {
+                self.folder = Some(new_path.join(tail));
+            }
+        }
+        if self.tree_selected.as_ref().is_some_and(|p| p.starts_with(target)) {
+            if let Ok(tail) = self.tree_selected.as_ref().unwrap().strip_prefix(target) {
+                self.tree_selected = Some(new_path.join(tail));
+            }
+        }
+        self.roots = self
+            .roots
+            .iter()
+            .map(|p| {
+                if p.starts_with(target) {
+                    p.strip_prefix(target)
+                        .ok()
+                        .map(|tail| new_path.join(tail))
+                        .unwrap_or_else(|| p.clone())
+                } else {
+                    p.clone()
+                }
+            })
+            .collect();
+        self.expanded = self
+            .expanded
+            .drain()
+            .map(|(p, v)| {
+                let p = if p.starts_with(target) {
+                    p.strip_prefix(target)
+                        .ok()
+                        .map(|tail| new_path.join(tail))
+                        .unwrap_or(p)
+                } else {
+                    p
+                };
+                (p, v)
+            })
+            .collect();
+        self.folder_children = self
+            .folder_children
+            .drain()
+            .map(|(p, kids)| {
+                let p = if p.starts_with(target) {
+                    p.strip_prefix(target)
+                        .ok()
+                        .map(|tail| new_path.join(tail))
+                        .unwrap_or(p)
+                } else {
+                    p
+                };
+                let kids = kids
+                    .into_iter()
+                    .map(|k| {
+                        if k.starts_with(target) {
+                            k.strip_prefix(target)
+                                .ok()
+                                .map(|tail| new_path.join(tail))
+                                .unwrap_or(k)
+                        } else {
+                            k
+                        }
+                    })
+                    .collect();
+                (p, kids)
+            })
+            .collect();
+        self.expanded_rows = self
+            .expanded_rows
+            .drain()
+            .map(|(p, rows)| {
+                let p = if p.starts_with(target) {
+                    p.strip_prefix(target)
+                        .ok()
+                        .map(|tail| new_path.join(tail))
+                        .unwrap_or(p)
+                } else {
+                    p
+                };
+                (p, rows)
+            })
+            .collect();
+
+        // Update loaded rows so the list stays coherent even before reload.
+        for f in &mut self.files {
+            if f.path.starts_with(target) {
+                if let Ok(tail) = f.path.strip_prefix(target) {
+                    f.path = new_path.join(tail);
+                    f.name = f
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| f.name.clone());
+                }
+            }
+        }
+        self.address = self
+            .folder
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+
+        if renamed_open {
+            self.load_folder(&new_path);
+        } else if let Some(folder) = self.folder.clone() {
+            self.load_folder(&folder);
+        } else {
+            self.say(format!("Renamed folder to \"{}\".", component));
+        }
     }
 }
 
@@ -2128,10 +2555,16 @@ mod tests {
     /// ~20,000 songs in ~1,000 artist folders.
     #[test]
     fn masks_survive_a_restart() {
-        super::save_masks("%2 - %1\\%7", "%1.%2", &["%1 - %2".to_string(), "%4 %3".to_string()]);
-        let (rename, f2t, saved) = super::load_masks().expect("masks file is read back");
+        super::save_masks(
+            "%2 - %1\\%7",
+            "%1.%2",
+            "%1",
+            &["%1 - %2".to_string(), "%4 %3".to_string()],
+        );
+        let (rename, f2t, folder, saved) = super::load_masks().expect("masks file is read back");
         assert_eq!(rename, "%2 - %1\\%7");
         assert_eq!(f2t, "%1.%2");
+        assert_eq!(folder, "%1");
         assert_eq!(saved, vec!["%1 - %2".to_string(), "%4 %3".to_string()]);
     }
 
