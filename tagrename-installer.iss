@@ -158,6 +158,7 @@ Name: "{group}\Tag-Rename"; Filename: "{app}\Tag-Rename.exe"; IconFilename: "{ap
 Name: "{autodesktop}\Tag-Rename"; Filename: "{app}\Tag-Rename.exe"; Tasks: desktopicon; IconFilename: "{app}\tagrename.ico"
 
 [Run]
-; Best-effort icon cache refresh. Ignore failures/non-zero exits.
-Filename: "ie4uinit.exe"; Parameters: "-show"; Flags: runhidden; StatusMsg: "Refreshing icons..."
-Filename: "ie4uinit.exe"; Parameters: "-ClearIconCache"; Flags: runhidden; StatusMsg: "Refreshing icons..."
+; Best-effort icon cache refresh. Run through cmd.exe so a missing
+; ie4uinit.exe cannot cause an installer CreateProcess error.
+Filename: "{cmd}"; Parameters: "/c ""{sys}\ie4uinit.exe"" -show >nul 2>&1"; Flags: runhidden; StatusMsg: "Refreshing icons..."
+Filename: "{cmd}"; Parameters: "/c ""{sys}\ie4uinit.exe"" -ClearIconCache >nul 2>&1"; Flags: runhidden; StatusMsg: "Refreshing icons..."
