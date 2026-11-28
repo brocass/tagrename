@@ -1967,26 +1967,21 @@ impl App {
         }
     }
 
-    /// Open the focused file with the system player.
+    /// Open the focused file with the system default music player.
     pub fn play_file(&mut self, i: usize) {
         let f = &self.files[i];
         #[cfg(unix)]
-        let spawned = std::process::Command::new("xdg-open")
+        let opened = std::process::Command::new("xdg-open")
             .arg(&f.path)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn();
+            .spawn()
+            .map(|_| ());
         #[cfg(windows)]
-        let spawned = std::process::Command::new("cmd")
-            .args(["/C", "start", ""])
-            .arg(&f.path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+        let opened = crate::windows_open::open_default(&f.path);
         #[cfg(not(any(unix, windows)))]
-        let spawned: std::io::Result<std::process::Child> =
-            Err(std::io::Error::other("unsupported platform"));
-        match spawned {
+        let opened: Result<(), String> = Err("unsupported platform".into());
+        match opened {
             Ok(_) => self.say(format!("Play file: {}", f.name)),
             Err(e) => self.warn(format!(
                 "Music player not found ({e}).\nPlease select a music player, or open the file yourself:\n{}",

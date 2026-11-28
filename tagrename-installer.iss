@@ -1,5 +1,5 @@
 #define MyAppName "Tag:Rename"
-#define MyAppVersion "1.1.7"
+#define MyAppVersion "1.1.8"
 #define MyAppPublisher "Steven Davis"
 #define MyAppExeName "tagrename.exe"
 
@@ -18,7 +18,7 @@ WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
 OutputDir=dist
-OutputBaseFilename=Tag-Rename-1.1.7-setup
+OutputBaseFilename=Tag-Rename-1.1.8-setup
 
 [Files]
 Source: "target\release\{#MyAppExeName}"; DestDir: "{app}"; DestName: "Tag-Rename.exe"; Flags: ignoreversion

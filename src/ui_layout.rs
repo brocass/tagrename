@@ -119,7 +119,7 @@ fn window_chrome(root: &mut Ui, ctx: &Context) {
             ui.painter().text(
                 bar.left_center() + egui::vec2(118.0, 0.0),
                 egui::Align2::LEFT_CENTER,
-                "1.1.7",
+                "1.1.8",
                 egui::FontId::proportional(12.0),
                 c_text_dim(),
             );

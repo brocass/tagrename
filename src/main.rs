@@ -16,6 +16,7 @@ mod tools;
 mod ui;
 mod ui_dialogs;
 mod ui_layout;
+mod windows_open;
 mod ui_tabs;
 mod ui_tageditor;
 
